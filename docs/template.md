@@ -52,7 +52,7 @@ Every other clone of the project, and every CI runner, creates its local tenant 
 | `.github/actions/mask-values/` | Masks identifiers and the GUIDs inside them in a job's logs and summary (see [ci-cd.md](ci-cd.md#public-logs)). |
 | `.github/dependabot.yml` | GitHub Actions updates with a 7-day cooldown (NuGet and Docker ready to uncomment). |
 | `.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/` | PR body and issue forms (feature, bug, phase). |
-| `README.md` | Project page: the description, the "personal project, not an official Microsoft product" note, then a table of contents of the pages. |
+| `README.md` | Project page: the description, the "personal project, not an official Microsoft product" note, the **Overview** and **Quick start** sections for the project to fill in, then a table of contents of the pages. |
 | `.github/SECURITY.md`, `docs/SUPPORT.md`, `docs/CONTRIBUTING.md`, `docs/CODE_OF_CONDUCT.md` | Private vulnerability reporting, as-is support, how to contribute, Contributor Covenant. |
 | `.editorconfig`, `.gitattributes`, `.gitignore`, `.dockerignore` | Editor rules, line endings, ignored secrets, local azd state, tenant files, databases and build output. |
 | `global.json`, `Directory.Build.props`, `Directory.Packages.props`, `nuget.config` | .NET 10 SDK, `net10.0`, analyzers, lock files, central package versions, approved feed only. |

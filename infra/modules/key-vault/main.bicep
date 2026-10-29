@@ -15,6 +15,8 @@ param privateEndpointNetworkInterfaceName string
 param privateEndpointSubnetId string = ''
 @description('Private DNS zone that resolves the private endpoint. Leave empty to deploy public-with-firewall.')
 param privateDnsZoneId string = ''
+@description('Allow the public endpoint behind the deny-by-default firewall when no private endpoint is configured. Trusted-service bypass remains configured independently.')
+param enablePublicAccess bool = true
 param logAnalyticsWorkspaceId string
 param enableWindowsVm bool = false
 param enableLinuxVm bool = false
@@ -35,8 +37,8 @@ var keyVaultSecretsUserRoleId = subscriptionResourceId(
 )
 
 // One module body serves every profile. With both private-networking inputs
-// supplied the vault is private-only; without them it stays reachable on the
-// public endpoint but the firewall still denies everything by default.
+// supplied public access is disabled; callers can also disable it without
+// adding a private endpoint. The trusted-service firewall exception is retained.
 var usePrivateEndpoint = !empty(privateEndpointSubnetId) && !empty(privateDnsZoneId)
 
 resource keyVault 'Microsoft.KeyVault/vaults@2024-11-01' = {
@@ -58,7 +60,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2024-11-01' = {
     enabledForDeployment: false
     enabledForDiskEncryption: false
     enabledForTemplateDeployment: true
-    publicNetworkAccess: usePrivateEndpoint ? 'Disabled' : 'Enabled'
+    publicNetworkAccess: usePrivateEndpoint || !enablePublicAccess ? 'Disabled' : 'Enabled'
     networkAcls: {
       bypass: 'AzureServices'
       defaultAction: 'Deny'

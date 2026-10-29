@@ -12,6 +12,7 @@ $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'naming.ps1')
 . (Join-Path $PSScriptRoot 'module-selection.ps1')
+. (Join-Path $PSScriptRoot 'graph-configuration.ps1')
 
 function Invoke-AzJson {
     param(
@@ -112,6 +113,9 @@ $featureSettings = [ordered] @{
     entraLogin        = $isFull
     shutdownSchedules = $isFull
     roleAssignments   = $true
+    apiManagement     = $false
+    aiFoundry         = $false
+    graphMcp          = $false
 }
 
 $supportedFeatures = @($featureSettings.Keys)
@@ -145,6 +149,9 @@ if ($anyVm -and -not $featureSettings.bastion) {
 $deployNetwork = $featureSettings.network -or $featureSettings.bastion -or $anyVm
 $deployKeyVault = $featureSettings.keyVault -or $anyVm
 $deployStorage = [bool] $featureSettings.storage
+
+Assert-GraphDeploymentSettings -Profile $deploymentProfile -Features $featureSettings `
+    -DeployNetwork $deployNetwork -Settings (Get-GraphEnvironmentSettings)
 
 # ---------------------------------------------------------------------------
 # Catalog-driven module enablement
@@ -205,6 +212,9 @@ Assert-DeploymentSubscription -SubscriptionId $subscriptionId
 $account = Invoke-AzJson -Arguments @('account', 'show', '--subscription', $subscriptionId)
 if ($account.state -ne 'Enabled') {
     throw "Subscription '$subscriptionId' is not enabled."
+}
+if (($featureSettings.apiManagement -or $featureSettings.aiFoundry) -and $account.environmentName -ne 'AzureCloud') {
+    throw 'The public Graph/Foundry PoC supports AzureCloud only; sovereign-cloud endpoints require a separately reviewed design.'
 }
 $null = Assert-SubscriptionCode -SubscriptionName $account.name `
     -CachedCode $cachedSubscriptionCode -SubscriptionId $subscriptionId

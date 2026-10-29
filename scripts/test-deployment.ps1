@@ -101,6 +101,8 @@ $expectedTypes = [ordered] @{
     AZURE_BASTION_NAME              = 'Microsoft.Network/bastionHosts'
     AZURE_WINDOWS_VM_NAME           = 'Microsoft.Compute/virtualMachines'
     AZURE_LINUX_VM_NAME             = 'Microsoft.Compute/virtualMachines'
+    AZURE_APIM_NAME                 = 'Microsoft.ApiManagement/service'
+    AZURE_AI_FOUNDRY_NAME           = 'Microsoft.CognitiveServices/accounts'
 }
 $workspaceId = Get-Value 'AZURE_LOG_ANALYTICS_WORKSPACE_ID'
 $expected = [System.Collections.Generic.List[object]]::new()
@@ -114,6 +116,27 @@ if ($workspaceId) {
 foreach ($item in $expected) {
     $found = @($resources | Where-Object { $_.name -ceq $item.Name -and ([string] $_.type) -ieq $item.Type }).Count -gt 0
     Write-Check -Passed $found -Message "$($item.Output) names an existing $($item.Type) '$($item.Name)'."
+}
+
+foreach ($output in @('AZURE_AI_PROJECT_ID', 'AZURE_GRAPH_MCP_API_ID')) {
+    $id = Get-Value $output
+    if (-not $id) { continue }
+    $child = Invoke-AzJson -Arguments @('resource', 'show', '--ids', $id, '--api-version',
+        $(if ($output -eq 'AZURE_GRAPH_MCP_API_ID') { '2025-09-01-preview' } else { '2025-06-01' }))
+    Write-Check -Passed ([string]$child.id -ieq $id) -Message "$output resolves to the reported child resource."
+}
+
+if (Get-Value 'AZURE_GRAPH_MCP_API_ID') {
+    $mcpId = Get-Value 'AZURE_GRAPH_MCP_API_ID'
+    $tools = Invoke-AzJson -Arguments @('rest', '--method', 'get', '--url',
+        "https://management.azure.com$mcpId/tools?api-version=2025-09-01-preview")
+    $actualTools = @($tools.value | ForEach-Object { $_.name } | Sort-Object)
+    $expectedTools = @('get_event', 'get_message', 'list_calendar_view', 'list_messages')
+    Write-Check -Passed (($actualTools -join ',') -ceq ($expectedTools -join ',')) -Message 'Native MCP exposes exactly the four approved tools.'
+    foreach ($tool in $tools.value) {
+        Write-Check -Passed ([string]$tool.properties.operationId -ceq "$($mcpId -replace '/apis/graph-mcp$', '/apis/graph-read')/operations/$($tool.name)") `
+            -Message 'Native tool references the expected full ARM operation ID.'
+    }
 }
 
 foreach ($output in @('AZURE_WINDOWS_VM_NAME', 'AZURE_LINUX_VM_NAME')) {

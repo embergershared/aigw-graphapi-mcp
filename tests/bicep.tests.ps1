@@ -26,6 +26,8 @@ $deploymentToModule = @{
     storage    = 'storage'
     bastion    = 'bastion'
     jumpboxes  = 'jumpboxes'
+    apiManagement = 'api-management'
+    aiFoundry = 'ai-foundry'
 }
 
 function Get-BicepFilesUnderTest {

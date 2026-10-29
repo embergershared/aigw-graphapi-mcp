@@ -158,6 +158,9 @@ function Get-NameVariableMap {
         windowsNic                 = 'windowsNicName'
         linuxVm                    = 'linuxVmName'
         linuxNic                   = 'linuxNicName'
+        apiManagement              = 'apiManagementName'
+        aiFoundry                  = 'aiFoundryName'
+        aiFoundryProject           = 'aiFoundryProjectName'
     }
 }
 
@@ -196,6 +199,9 @@ function Get-ProfileFeatureFlags {
         enableEntraLogin        = $null
         enableShutdownSchedules = $null
         enableRoleAssignments   = $EnableRoleAssignments
+        enableApiManagement     = $false
+        enableAiFoundry          = $false
+        enableGraphMcp           = $false
         featureOverridesBase64  = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($json))
     }
 
@@ -203,7 +209,8 @@ function Get-ProfileFeatureFlags {
     foreach ($name in @(
             'deployNetwork', 'deployKeyVault', 'deployStorage', 'deployBastion',
             'deployWindowsVm', 'deployLinuxVm', 'deployNatGateway', 'deployEntraLogin',
-            'deployShutdownSchedules', 'deployAnyVm', 'assignRoles')) {
+            'deployShutdownSchedules', 'deployAnyVm', 'assignRoles',
+            'deployApiManagement', 'deployAiFoundry', 'configureGraphMcp')) {
         $expression = $Template.variables.$name
         if ($null -eq $expression) {
             throw "infra/main.bicep no longer defines the variable '$name'."

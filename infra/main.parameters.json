@@ -31,6 +31,24 @@
     },
     "enableKeyVaultPurgeProtection": {
       "value": "${AZURE_KEY_VAULT_PURGE_PROTECTION=true}"
+    },
+    "apimPublisherName": {
+      "value": "${APIM_PUBLISHER_NAME=}"
+    },
+    "apimPublisherEmail": {
+      "value": "${APIM_PUBLISHER_EMAIL=}"
+    },
+    "graphGatewayClientId": {
+      "value": "${GRAPH_GATEWAY_CLIENT_ID=}"
+    },
+    "graphAllowedClientIdsCsv": {
+      "value": "${GRAPH_ALLOWED_CLIENT_IDS=}"
+    },
+    "graphCredentialSecretName": {
+      "value": "${GRAPH_CREDENTIAL_SECRET_NAME=graph-obo-client-secret}"
+    },
+    "foundryDeploymentsBase64": {
+      "value": "${FOUNDRY_DEPLOYMENTS_BASE64=}"
     }
   }
 }

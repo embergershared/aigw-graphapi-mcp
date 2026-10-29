@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- The pinned, supported Responses SDK still marks its MCP/OAuth surface experimental. -->
+    <NoWarn>$(NoWarn);OPENAI001</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Azure.AI.Projects" />
+    <PackageReference Include="Azure.AI.Extensions.OpenAI" />
+    <!-- Azure.Core 1.53 also exposes identity compatibility types; select the pinned Identity implementation explicitly. -->
+    <PackageReference Include="Azure.Identity" Aliases="AzureIdentity" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\infra\modules\api-management\contract.json" LogicalName="GraphMcp.Contract.json" />
+    <InternalsVisibleTo Include="GraphMcp.TestClient.Tests" />
+  </ItemGroup>
+</Project>

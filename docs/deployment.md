@@ -3,6 +3,12 @@
 Use three gated phases. The template is infrastructure-only, so `azd provision`
 is the deployment operation; `azd deploy` has no application service to publish.
 
+For the approved Graph workload, follow [the Graph MCP staged runbook](graph-mcp.md)
+and `.azure/deployment-plan.md`. Offline preparation is not live validation.
+No target, cost/budget, exact model deployment or tenant change is approved.
+APIM/Foundry infrastructure, Entra/credentials/consent and per-user tool execution
+have separate gates. Do not invent an azd application packaging step for native MCP.
+
 Requirements scale with the [deployment profile](configuration.md#profiles). A
 `core` deployment needs far less than a `full` one, and the sections below mark
 which requirements are conditional.
@@ -122,7 +128,9 @@ azd env set AZURE_OPERATOR_PRINCIPAL_IDS <entra-object-guid>
 ```
 
 The final command is a required one-time bootstrap for each new environment.
-It initializes the stable subscription code and lifecycle values. AZD resolves
+It initializes the stable subscription code, lifecycle values and Base64
+transport for feature overrides and selected Foundry deployments. Rerun it
+after changing those source values before a preview. AZD resolves
 required Bicep parameters before running pre-provision hooks; later provisions
 verify the code and refresh update metadata automatically.
 

@@ -195,7 +195,40 @@ key, or a data migration) gets a migration path, a backup before it runs, and a 
 
 ## This project
 
-Test to use AI Gateway MCP server features to expose the Graph API through a MCP server.
+An infrastructure-only azd project with opt-in APIM Developer, Foundry account/project,
+and delegated read-only Microsoft Graph REST/native MCP tools. See `docs/graph-mcp.md`.
+No hosted MCP server or agent application is deployed.
+
+The public PoC requires `core` with explicit `apiManagement`, `aiFoundry` and `keyVault`
+overrides. `graphMcp` remains off until separately approved tenant apps, downstream consent
+and a vault credential exist. Tenant apps are not resource-group resources. Native MCP
+management uses the accepted `2025-09-01-preview`; never inspect its streaming response
+body. Both surfaces use the shared delegated-token validation; OBO alone authorizes Graph.
+The authoritative bounds/fields live in `infra/modules/api-management/contract.json`.
+Details are capped at 65,536 UTF-8 bytes and lists at 131,072, with explicit failure rather
+than truncation. No token/payload cache or payload/header diagnostics.
+Azure Monitor diagnostics require the declared logger to exist; omit its
+optional credentials property, never send an empty object or add monitoring
+RBAC/credentials as an inferred fix. Verify both children live.
+Preserve APIM's explicit transport/legacy-portal restrictions and the gateway
+vault's disabled public network access with its default-deny trusted-service
+firewall; never silently open access during provisioning or credential setup.
+
+Keep `FOUNDRY_DEPLOYMENTS_JSON` as the user-selected source value. The preprovision
+tag hook derives `FOUNDRY_DEPLOYMENTS_BASE64` for azd interpolation, like feature
+overrides; never substitute raw quoted JSON into `infra/main.parameters.json`.
+Base64 is transport, not secret protection.
+
+`scripts/configure-graph-identity.ps1`, `set-graph-credential.ps1` and
+`configure-foundry-oauth.ps1` prepare offline by default. Applying identity or credential
+changes requires separate approval and verified CLI/azd target context. Reprovision must
+not rotate credentials. Never grant broad Foundry Contributor access to solve a
+user/consent problem.
+Credential creation/rotation currently fails closed before `addPassword`: no
+mutation-free Set Secret readiness proof is implemented. Do not bypass this with
+metadata, RBAC, tokens or a caller flag; a bounded probe/route and its verification
+need separate approval. Storage failure recovery exposes only nonsecret new-key
+metadata; never retry creation or remove a credential without explicit authority.
 
 <!-- Add what an agent can't learn quickly from the code: build and run commands, the
      architecture in a few lines, domain terms, where logs go, and known gotchas. -->

@@ -1,0 +1,173 @@
+name: Deploy a throwaway environment
+
+# Reusable. pr-deployment.yml and pr-deployment-full.yml call it once per
+# profile, with `secrets: inherit`. It creates a throwaway azd environment,
+# previews it (what-if), provisions it, checks the result and always tears it
+# down, even when an earlier step fails or the run is cancelled. The
+# environment's Key Vault is created without purge protection so the teardown
+# can purge it.
+#
+# The repository is public, so its run logs are too: every identifier is a
+# secret, masked first, and the summary and pull request comment show only the
+# what-if counts. Setup, identities and costs: docs/ci-deployment.md.
+on:
+  workflow_call:
+    inputs:
+      profile:
+        description: The deployment profile, core, private or full.
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: ${{ inputs.profile }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    # Required reviewers on this GitHub environment approve every run before it
+    # reaches Azure, and the federated credential trusts only this environment.
+    environment: pr-deployment
+    concurrency:
+      group: pr-deployment-${{ github.event.pull_request.number || github.ref }}-${{ inputs.profile }}
+      # Never cancel a run half way: its teardown would not get to run.
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      CI_LOCATION: ${{ vars.AZURE_LOCATION || 'eastus2' }}
+      CI_OPERATOR_PRINCIPAL_IDS: ${{ secrets.CI_OPERATOR_PRINCIPAL_IDS }}
+      CI_FEATURE_OVERRIDES_JSON: ${{ vars.CI_FEATURE_OVERRIDES_JSON || '{}' }}
+      CI_PROFILE: ${{ inputs.profile }}
+      CI_PULL_REQUEST: ${{ github.event.pull_request.number || 0 }}
+      CI_TENANT_CODE: ${{ secrets.CI_TENANT_CODE }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # GitHub masks each secret whole; this also masks each GUID inside them,
+      # so one operator ID out of the list stays masked.
+      - uses: ./.github/actions/mask-values
+        with:
+          values: |
+            ${{ secrets.AZURE_TENANT_ID }}
+            ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+            ${{ secrets.AZURE_CLIENT_ID }}
+            ${{ secrets.CI_TENANT_CODE }}
+            ${{ secrets.CI_OPERATOR_PRINCIPAL_IDS }}
+
+      # The tenant catalog is gitignored; Bicep and preflight need it.
+      - name: Write the tenant catalog
+        shell: pwsh
+        run: |
+          . ./scripts/ci-environments.ps1
+          New-CiTenantCatalog -TenantId $env:AZURE_TENANT_ID -TenantCode $env:CI_TENANT_CODE -Path infra/core/tenant-codes.json
+
+      - name: Install azd
+        uses: Azure/setup-azd@0b7e3a35ab00f2eee7080c845eb39c3f0ebfa553 # v2.4.0
+
+      - name: Sign the Azure CLI in
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign azd in
+        shell: pwsh
+        run: |
+          azd auth login --client-id $env:AZURE_CLIENT_ID --tenant-id $env:AZURE_TENANT_ID --federated-credential-provider github
+          if ($LASTEXITCODE) { throw 'azd sign-in failed.' }
+
+      - name: Create the environment
+        id: env
+        shell: pwsh
+        run: |
+          . ./scripts/ci-environments.ps1
+          $name = Get-CiEnvironmentName -DeploymentProfile $env:CI_PROFILE -PullRequest $env:CI_PULL_REQUEST `
+              -RunNumber $env:GITHUB_RUN_NUMBER -RunAttempt $env:GITHUB_RUN_ATTEMPT
+          # Recorded before anything is created, so the teardown always knows it.
+          "name=$name" >> $env:GITHUB_OUTPUT
+
+          azd env new $name --subscription $env:AZURE_SUBSCRIPTION_ID --location $env:CI_LOCATION --no-prompt
+          if ($LASTEXITCODE) { throw "Unable to create the azd environment '$name'." }
+          $settings = [ordered] @{
+              DEPLOYMENT_PROFILE               = $env:CI_PROFILE
+              AZURE_KEY_VAULT_PURGE_PROTECTION = 'false'
+              AZURE_FEATURE_OVERRIDES_JSON     = $env:CI_FEATURE_OVERRIDES_JSON
+          }
+          if ($env:CI_OPERATOR_PRINCIPAL_IDS) { $settings.AZURE_OPERATOR_PRINCIPAL_IDS = $env:CI_OPERATOR_PRINCIPAL_IDS }
+          foreach ($setting in $settings.GetEnumerator()) {
+              azd env set $setting.Key $setting.Value -e $name
+              if ($LASTEXITCODE) { throw "Unable to set $($setting.Key)." }
+          }
+          ./scripts/set-deployment-tags.ps1
+          Write-Output "Created the throwaway environment '$name' for the $env:CI_PROFILE profile."
+
+      # The full preview goes only to this step's masked log.
+      - name: Preview (what-if)
+        id: preview
+        shell: pwsh
+        env:
+          ENV_NAME: ${{ steps.env.outputs.name }}
+        run: |
+          azd provision --preview --no-prompt -e $env:ENV_NAME 2>&1 | Tee-Object -FilePath preview.txt
+          if ($LASTEXITCODE) { throw "The preview failed with exit code $LASTEXITCODE." }
+
+      - name: Publish the what-if counts
+        if: always() && steps.env.outputs.name != ''
+        shell: pwsh
+        env:
+          ENV_NAME: ${{ steps.env.outputs.name }}
+          OUTCOME: ${{ steps.preview.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          . ./scripts/ci-environments.ps1
+          $preview = [string] $(if (Test-Path -LiteralPath preview.txt) { Get-Content -LiteralPath preview.txt -Raw })
+          $comment = ConvertTo-PreviewComment -DeploymentProfile $env:CI_PROFILE -EnvironmentName $env:ENV_NAME `
+              -Preview $preview -Outcome $env:OUTCOME -RunUrl $env:RUN_URL
+          Set-Content -LiteralPath comment.md -Value $comment
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $comment
+          if ([int] $env:CI_PULL_REQUEST -gt 0) {
+              ./scripts/publish-pr-comment.ps1 -Repository $env:GITHUB_REPOSITORY -PullRequest $env:CI_PULL_REQUEST -BodyPath comment.md
+          }
+
+      - name: Provision
+        shell: pwsh
+        env:
+          ENV_NAME: ${{ steps.env.outputs.name }}
+        run: |
+          azd provision --no-prompt -e $env:ENV_NAME
+          if ($LASTEXITCODE) { throw "Provisioning failed with exit code $LASTEXITCODE." }
+
+      - name: Check the deployment
+        shell: pwsh
+        env:
+          ENV_NAME: ${{ steps.env.outputs.name }}
+        run: ./scripts/test-deployment.ps1 -Environment $env:ENV_NAME
+
+      # The first sign-in can expire during a long full-profile run.
+      - name: Refresh the Azure sign-in
+        if: always() && steps.env.outputs.name != ''
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Tear down
+        if: always() && steps.env.outputs.name != ''
+        shell: pwsh
+        env:
+          ENV_NAME: ${{ steps.env.outputs.name }}
+        run: |
+          ./scripts/remove-ci-environments.ps1 -SubscriptionId $env:AZURE_SUBSCRIPTION_ID `
+              -Repository $env:GITHUB_REPOSITORY -EnvironmentName $env:ENV_NAME

@@ -1,0 +1,61 @@
+name: PR deployment cleanup
+
+# Removes throwaway pull request environments that a failed or interrupted
+# teardown left behind, and purges their soft-deleted Key Vaults. It only
+# touches resource groups this repository tagged as throwaway environments;
+# see scripts/remove-ci-environments.ps1. Skipped until the PR_DEPLOYMENT_ENABLED
+# repository variable is 'true'. Setup: docs/ci-deployment.md.
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+    inputs:
+      older_than_hours:
+        description: Remove environments created more than this many hours ago
+        type: number
+        default: 6
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-deployment-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Cleanup
+    if: vars.PR_DEPLOYMENT_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/mask-values
+        with:
+          values: |
+            ${{ secrets.AZURE_TENANT_ID }}
+            ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+            ${{ secrets.AZURE_CLIENT_ID }}
+            ${{ secrets.CI_TENANT_CODE }}
+
+      - name: Sign the Azure CLI in
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Remove leftover environments
+        shell: pwsh
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          OLDER_THAN_HOURS: ${{ inputs.older_than_hours || 6 }}
+        run: |
+          ./scripts/remove-ci-environments.ps1 -SubscriptionId $env:AZURE_SUBSCRIPTION_ID `
+              -Repository $env:GITHUB_REPOSITORY -OlderThanHours ([int] $env:OLDER_THAN_HOURS)

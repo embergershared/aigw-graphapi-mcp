@@ -1,0 +1,98 @@
+name: PR deployment
+
+# Deploys every pull request that changes infrastructure into throwaway core
+# and private environments before it can merge: a what-if preview posted on
+# the pull request, a real provision, post-deployment checks and a teardown.
+# The full profile runs from pr-deployment-full.yml when the pull request
+# carries the deploy-full label.
+#
+# "PR deployment result" is the one check to require in a ruleset. It always
+# reports, so pull requests that change no infrastructure are not blocked.
+# Until the PR_DEPLOYMENT_ENABLED repository variable is 'true' every job is skipped.
+# Setup: docs/ci-deployment.md.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Profile to deploy from the selected branch
+        type: choice
+        options: [core, private, full]
+        default: core
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan
+    # Pull requests from forks never receive Azure credentials.
+    if: >-
+      vars.PR_DEPLOYMENT_ENABLED == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      profiles: ${{ steps.plan.outputs.profiles }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The pull request merge commit and its base parent.
+          fetch-depth: 2
+
+      - name: Choose the profiles
+        id: plan
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_PROFILE: ${{ inputs.profile }}
+        run: |
+          . ./scripts/ci-environments.ps1
+          $changed = $false
+          if ($env:EVENT_NAME -eq 'pull_request') {
+              $files = @(git diff --name-only HEAD^1 HEAD)
+              if ($LASTEXITCODE) { throw 'Unable to list the files the pull request changes.' }
+              $changed = Test-InfrastructureChange -Path $files
+          }
+          $profiles = @(Get-CiDeploymentProfiles -EventName $env:EVENT_NAME `
+                  -DispatchProfile ([string] $env:DISPATCH_PROFILE) -InfrastructureChanged $changed)
+          "profiles=$(ConvertTo-Json -InputObject $profiles -Compress)" >> $env:GITHUB_OUTPUT
+          Write-Output "Profiles to deploy: $(if ($profiles.Count) { $profiles -join ', ' } else { 'none, no infrastructure change' })."
+
+  deploy:
+    name: Deploy
+    needs: plan
+    if: needs.plan.outputs.profiles != '' && needs.plan.outputs.profiles != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: ${{ fromJson(needs.plan.outputs.profiles) }}
+    uses: ./.github/workflows/deploy-environment.yml
+    secrets: inherit
+    with:
+      profile: ${{ matrix.profile }}
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+
+  result:
+    name: PR deployment result
+    needs: [plan, deploy]
+    if: always() && vars.PR_DEPLOYMENT_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report
+        shell: pwsh
+        env:
+          PLAN: ${{ needs.plan.result }}
+          DEPLOY: ${{ needs.deploy.result }}
+        run: |
+          Write-Output "Plan: $env:PLAN. Deploy: $env:DEPLOY."
+          if ($env:PLAN -eq 'skipped') { Write-Output 'Not deployed: pull requests from forks never receive Azure credentials.' }
+          if ($env:PLAN -in 'failure', 'cancelled' -or $env:DEPLOY -in 'failure', 'cancelled') {
+              throw 'A throwaway deployment failed or was cancelled; see the Deploy jobs.'
+          }

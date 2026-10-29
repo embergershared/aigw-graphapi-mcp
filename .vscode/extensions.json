@@ -1,0 +1,13 @@
+{
+  "recommendations": [
+    "ms-dotnettools.csdevkit",
+    "ms-python.python",
+    "charliermarsh.ruff",
+    "ms-vscode.powershell",
+    "ms-azuretools.vscode-bicep",
+    "ms-azuretools.azure-dev",
+    "github.vscode-github-actions",
+    "editorconfig.editorconfig",
+    "ms-azuretools.vscode-docker"
+  ]
+}

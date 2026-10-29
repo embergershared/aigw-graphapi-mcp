@@ -56,6 +56,7 @@ Test-Case 'Initialize-Repo names the project, removes the template-only parts an
         Assert-Equal -Actual @(Get-Placeholders $root).Count -Expected 0 -Message 'No placeholder may be left outside docs/template.md.'
         $readme = Get-Content -LiteralPath (Join-Path $root 'README.md') -Raw
         Assert-Match -Actual $readme -Pattern '^# budget-tracker\r?\n\r?\nBudget tracker on Azure\.' -Message 'The README must open with the project name and description.'
+        Assert-Match -Actual $readme -Pattern '(?s)\n## Overview\r?\n.*\n## Quick start\r?\n.*\n## Contents\r?\n' -Message 'The README must keep its Overview and Quick start sections before Contents.'
         $rules = Get-Content -LiteralPath (Join-Path $root '.github/copilot-instructions.md') -Raw
         Assert-Match -Actual $rules -Pattern 'gh issue create --repo contoso/budget-tracker' -Message 'The rules must name the new repository.'
         foreach ($file in 'README.md', 'docs/CHANGELOG.md') {

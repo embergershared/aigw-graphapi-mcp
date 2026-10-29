@@ -10,6 +10,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Repository created from
   [embergershared/azd-private-starter-template](https://github.com/embergershared/azd-private-starter-template).
 <!-- template:start -->
+- README: **Overview** and **Quick start** sections for the project to fill in, before the
+  table of contents; the README rules keep them (#40).
 - One setup script, `scripts/Initialize-Repo.ps1`, turns a new repository into its own
   project: names, stacks, repository settings and security features, then its first issue
   and PR (#17).

@@ -22,7 +22,7 @@ Test-Case 'all configuration entrypoints prepare offline without calling Azure o
     Assert-Equal $identity.status 'PreparedOnly' 'Identity preparation must be the default.'
     $credential=& (Get-RepoPath 'scripts/set-graph-credential.ps1') -Environment synthetic
     Assert-Equal $credential.SecretCreated $false 'Offline preparation must not create credentials.'
-    Assert-Equal $credential.CredentialWriteSupported $false 'Preparation must expose the unresolved Set Secret readiness gate.'
+    Assert-Equal $credential.CredentialWriteSupported $true 'Preparation reports the ARM storage route; Apply still needs approval.'
     $oauth=& (Get-RepoPath 'scripts/configure-foundry-oauth.ps1') `
         -TenantId '00000000-0000-0000-0000-000000000001' `
         -GatewayClientId '00000000-0000-0000-0000-000000000002' `
@@ -177,12 +177,12 @@ Test-Case 'credential apply never resets an existing owned credential without ex
     Assert-Equal $result.VaultCopyVerified $false 'Do not pretend an untouched vault copy was verified.'
 }
 
-Test-Case 'credential creation and rotation fail before addPassword when only vault metadata and tokens are available' {
+Test-Case 'credential creation and rotation fail before addPassword when the ARM write probe fails' {
     $tenant='00000000-0000-0000-0000-000000000001'
     $subscription='00000000-0000-0000-0000-000000000002'
     $claims=@{tid=$tenant;scp='Application.ReadWrite.All';idtyp='user'} | ConvertTo-Json -Compress
     $operatorToken='synthetic.' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($claims)).TrimEnd('=').Replace('+','-').Replace('/','_') + '.synthetic'
-    $global:GraphCredentialReadinessTestState=@{HasCredential=$false;GraphReads=0;Mutations=0;VaultTokens=0}
+    $global:GraphCredentialReadinessTestState=@{HasCredential=$false;GraphReads=0;Probes=0;Mutations=0;VaultTokens=0}
     function az {
         $global:LASTEXITCODE=0
         if($args[0] -eq 'account' -and $args[1] -eq 'show'){
@@ -210,9 +210,13 @@ Test-Case 'credential creation and rotation fail before addPassword when only va
     }
     function Invoke-RestMethod {
         param($Method,$Uri,$Headers,$ContentType,$Body,$TimeoutSec)
+        if($Method -eq 'Put' -and $Uri -ceq "https://management.azure.com/subscriptions/$subscription/resourceGroups/synthetic/providers/Microsoft.KeyVault/vaults/contoso-synthetic/secrets/graph-obo-write-probe?api-version=2023-07-01"){
+            $global:GraphCredentialReadinessTestState.Probes++
+            throw [System.Net.Http.HttpRequestException]::new('synthetic route failure')
+        }
         if($Method -ne 'GET' -or ([uri]$Uri).AbsolutePath -cne '/v1.0/applications'){
             $global:GraphCredentialReadinessTestState.Mutations++
-            throw 'Unexpected password/probe/secret mutation before readiness.'
+            throw 'Unexpected password/secret mutation before readiness.'
         }
         $global:GraphCredentialReadinessTestState.GraphReads++
         return [pscustomobject]@{value=@([pscustomobject]@{
@@ -234,10 +238,11 @@ Test-Case 'credential creation and rotation fail before addPassword when only va
             } catch {$failure=$_}
             Assert-True ($null -ne $failure) 'Both first creation and explicit rotation must fail closed.'
             Assert-Match $failure.Exception.Message 'blocked before addPassword' 'Do not mistake metadata/token success for write readiness.'
-            Assert-Match $failure.Exception.Message 'separate approval and implementation' 'A caller flag must not stand in for proof.'
+            Assert-Match $failure.Exception.Message 'write probe through ARM failed' 'A failed route must stop before any credential exists.'
         }
         Assert-Equal $global:GraphCredentialReadinessTestState.GraphReads 2 'Owned-app metadata reads are bounded.'
-        Assert-Equal $global:GraphCredentialReadinessTestState.Mutations 0 'Never create a credential or live probe.'
+        Assert-Equal $global:GraphCredentialReadinessTestState.Probes 2 'One nonsecret probe per attempt, before addPassword.'
+        Assert-Equal $global:GraphCredentialReadinessTestState.Mutations 0 'Never create a credential when the probe fails.'
         Assert-Equal $global:GraphCredentialReadinessTestState.VaultTokens 0 'Stop even before acquiring a vault token.'
     } finally {Remove-Variable -Name GraphCredentialReadinessTestState -Scope Global}
 }
@@ -248,12 +253,12 @@ Test-Case 'post-create vault failures expose exact nonsecret recovery metadata w
     $vaultToken='synthetic-sensitive-token'
     function Invoke-RestMethod {
         param($Method,$Uri,$Headers,$ContentType,$Body,$TimeoutSec)
-        if($Method -ne 'Put' -or $Uri -cne 'https://contoso-synthetic.vault.azure.net/secrets/graph-obo-client-secret?api-version=7.4'){
+        if($Method -ne 'Put' -or $Uri -cne 'https://management.azure.com/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/synthetic/providers/Microsoft.KeyVault/vaults/contoso-synthetic/secrets/graph-obo-client-secret?api-version=2023-07-01'){
             throw 'Unexpected probe, credential removal or retry.'
         }
         $global:GraphCredentialVaultTestState.Writes++
         $payload=$Body | ConvertFrom-Json
-        if($payload.value -cne $credentialValue -or $Headers.Authorization -cne "Bearer $vaultToken"){
+        if($payload.properties.value -cne $credentialValue -or $Headers.Authorization -cne "Bearer $vaultToken"){
             throw 'Unexpected synthetic storage payload.'
         }
         switch($global:GraphCredentialVaultTestState.Mode){
@@ -267,8 +272,8 @@ Test-Case 'post-create vault failures expose exact nonsecret recovery metadata w
             }
             'Timeout' {throw [System.Threading.Tasks.TaskCanceledException]::new($credentialValue)}
             'Transport' {throw [System.Net.Http.HttpRequestException]::new($credentialValue)}
-            'MissingVersion' {return [pscustomobject]@{value=$credentialValue}}
-            'WrongSecret' {return [pscustomobject]@{id='https://contoso-synthetic.vault.azure.net/secrets/unrelated/version';value=$credentialValue}}
+            'MissingVersion' {return [pscustomobject]@{properties=[pscustomobject]@{attributes=@{enabled=$true}}}}
+            'WrongSecret' {return [pscustomobject]@{properties=[pscustomobject]@{secretUriWithVersion='https://contoso-synthetic.vault.azure.net/secrets/unrelated/version'}}}
             default {throw 'Unexpected test mode.'}
         }
     }
@@ -284,8 +289,9 @@ Test-Case 'post-create vault failures expose exact nonsecret recovery metadata w
             if($mode -ceq 'MissingKeyId'){$credential.keyId=$null}
             $arguments=@{
                 ApplicationObjectId='00000000-0000-0000-0000-000000000010';Credential=$credential
+                SubscriptionId='00000000-0000-0000-0000-000000000002';ResourceGroupName='synthetic'
                 VaultName='contoso-synthetic';SecretName='graph-obo-client-secret'
-                ExpiresOn=[DateTimeOffset]'2030-01-01T00:00:00Z';VaultToken=$vaultToken
+                ExpiresOn=[DateTimeOffset]'2030-01-01T00:00:00Z';ArmToken=$vaultToken
             }
             $failure=$null;$output=@()
             try {$output=@(Save-GraphCredentialVaultCopy @arguments)}catch{$failure=$_}
@@ -312,17 +318,55 @@ Test-Case 'post-create vault failures expose exact nonsecret recovery metadata w
 Test-Case 'credential storage confirms the intended version without returning the value (mocked transport only)' {
     function Invoke-RestMethod {
         param($Method,$Uri,$Headers,$ContentType,$Body,$TimeoutSec)
-        [pscustomobject]@{id='https://contoso-synthetic.vault.azure.net/secrets/graph-obo-client-secret/version';value='synthetic-sensitive-value'}
+        [pscustomobject]@{properties=[pscustomobject]@{secretUriWithVersion='https://contoso-synthetic.vault.azure.net/secrets/graph-obo-client-secret/version'}}
     }
     $arguments=@{
         ApplicationObjectId='00000000-0000-0000-0000-000000000010'
         Credential=[pscustomobject]@{keyId='00000000-0000-0000-0000-000000000011';endDateTime='2030-01-01T00:00:00Z';secretText='synthetic-sensitive-value'}
+        SubscriptionId='00000000-0000-0000-0000-000000000002';ResourceGroupName='synthetic'
         VaultName='contoso-synthetic';SecretName='graph-obo-client-secret'
-        ExpiresOn=[DateTimeOffset]'2030-01-01T00:00:00Z';VaultToken='synthetic-sensitive-token'
+        ExpiresOn=[DateTimeOffset]'2030-01-01T00:00:00Z';ArmToken='synthetic-sensitive-token'
     }
     $result=Save-GraphCredentialVaultCopy @arguments
     Assert-Equal $result.Status 'CredentialStored' 'Only a confirmed intended version can report success.'
     Assert-Equal $result.VaultCopyVerified $true 'A Set Secret response confirms that particular write only.'
     Assert-Equal $result.PreviousCredentialsRemoved $false 'Successful storage is not credential retirement approval.'
     Assert-NotMatch ($result | ConvertTo-Json -Compress) 'synthetic-sensitive-value|synthetic-sensitive-token|secretText' 'Return nonsecret metadata only.'
+}
+
+Test-Case 'Foundry agent plan targets the gateway audience through OAuth and exposes only the four read-only tools (offline)' {
+    $arguments=@{
+        Environment='synthetic';TenantId='00000000-0000-0000-0000-000000000001'
+        GatewayClientId='00000000-0000-0000-0000-000000000002';FoundryClientId='00000000-0000-0000-0000-000000000003'
+        McpServerUrl='https://contoso.azure-api.net/graph-mcp/mcp';ModelDeploymentName='synthetic-model'
+    }
+    $plan=& (Get-RepoPath 'scripts/configure-foundry-agent.ps1') @arguments
+    Assert-Equal $plan.Status 'PreparedOnly' 'Without -Apply nothing is created.'
+    Assert-Equal $plan.Connection.authType 'OAuth2' 'Each user signs in: OAuth identity passthrough.'
+    Assert-Equal ($plan.Connection.scopes -join ' ') 'api://00000000-0000-0000-0000-000000000002/access_as_user offline_access' 'Tokens target the owned gateway audience, refreshable.'
+    Assert-Equal $plan.Connection.authorizationUrl 'https://login.microsoftonline.com/00000000-0000-0000-0000-000000000001/oauth2/v2.0/authorize' 'Tenant-specific authority only.'
+    $tool=$plan.Agent.definition.tools[0]
+    Assert-Equal $tool.type 'mcp' 'The agent uses the APIM MCP server as its tool.'
+    Assert-Equal $tool.project_connection_id 'graph-mcp-oauth' 'The tool authenticates through the OAuth connection.'
+    Assert-Equal ($tool.allowed_tools -join ',') 'list_messages,get_message,list_calendar_view,get_event' 'Only the four read-only tools.'
+    Assert-Equal $tool.require_approval 'always' 'Every MCP call stays an explicit approval.'
+    Assert-Equal $plan.Agent.definition.model 'synthetic-model' 'The selected model deployment.'
+    Assert-NotMatch ($plan | ConvertTo-Json -Depth 10 -Compress) 'clientSecret|secretText|password' 'The plan carries no credential.'
+    $plainHttp=$arguments.Clone(); $plainHttp.McpServerUrl='http://contoso.azure-api.net/graph-mcp/mcp'
+    Assert-Throws {& (Get-RepoPath 'scripts/configure-foundry-agent.ps1') @plainHttp} 'Plain HTTP MCP URLs are rejected.'
+    $sameApp=$arguments.Clone(); $sameApp.FoundryClientId=$arguments.GatewayClientId
+    Assert-Throws {& (Get-RepoPath 'scripts/configure-foundry-agent.ps1') @sameApp} 'The gateway and Foundry apps must differ.'
+}
+
+Test-Case 'Foundry agent script reads the version from both agent API response shapes' {
+    $tokens=$null; $errors=$null
+    $ast=[System.Management.Automation.Language.Parser]::ParseFile((Get-RepoPath 'scripts/configure-foundry-agent.ps1'),[ref]$tokens,[ref]$errors)
+    $definition=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-AgentVersion'},$true)
+    Assert-True ($null -ne $definition) 'Get-AgentVersion must exist.'
+    . ([scriptblock]::Create($definition.Extent.Text))
+    Set-StrictMode -Version Latest
+    $agent=[pscustomobject]@{object='agent';name='synthetic';versions=[pscustomobject]@{latest=[pscustomobject]@{version='1'}}}
+    Assert-Equal (Get-AgentVersion $agent) '1' 'POST /agents nests the version under versions.latest.'
+    Assert-Equal (Get-AgentVersion ([pscustomobject]@{object='agent.version';version='2'})) '2' 'POST /agents/{name}/versions returns the version itself.'
+    Assert-Equal (Get-AgentVersion ([pscustomobject]@{object='agent'})) '' 'A response without a version reports none instead of failing.'
 }

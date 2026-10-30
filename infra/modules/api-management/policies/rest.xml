@@ -33,8 +33,8 @@
           || (string)cursor["operation"] != operation || (string)cursor["userId"] != user || !list
           || cursor.Properties().Count() != 3 || cursor["nextLink"]?.Type != JTokenType.String) { return "invalid_continuation"; }
         Uri next;
-        if (!Uri.TryCreate((string)cursor["nextLink"], UriKind.Absolute, out next)
-          || next.Scheme != "https" || next.Host != "graph.microsoft.com" || next.Port != 443
+        try { next = new Uri((string)cursor["nextLink"]); } catch { return "invalid_continuation"; }
+        if (!next.IsAbsoluteUri || next.Scheme != "https" || next.Host != "graph.microsoft.com" || next.Port != 443
           || next.UserInfo.Length != 0 || next.Fragment.Length != 0 || next.AbsolutePath != basePath
           || next.Query.Length == 0) { return "invalid_continuation"; }
         var nextQuery = new Dictionary&lt;string, string&gt;();
@@ -142,8 +142,8 @@
             JToken continuation = JValue.CreateNull();
             if (json["@odata.nextLink"] != null) {
               Uri next;
-              if (!Uri.TryCreate((string)json["@odata.nextLink"], UriKind.Absolute, out next)
-                || next.Scheme != "https" || next.Host != "graph.microsoft.com" || next.Port != 443
+              try { next = new Uri((string)json["@odata.nextLink"]); } catch { return "invalid_backend_continuation"; }
+              if (!next.IsAbsoluteUri || next.Scheme != "https" || next.Host != "graph.microsoft.com" || next.Port != 443
                 || next.UserInfo.Length != 0 || next.Fragment.Length != 0 || next.AbsolutePath != (string)tool["path"]) { return "invalid_backend_continuation"; }
               var cursor = new JObject(new JProperty("operation", operation),
                 new JProperty("userId", ((Jwt)context.Variables["gatewayJwt"]).Claims["oid"][0]),

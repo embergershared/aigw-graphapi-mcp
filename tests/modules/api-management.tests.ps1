@@ -169,3 +169,14 @@ Test-Case 'Graph composition preserves restricted vault access without new priva
     Assert-Equal @($resource.properties.networkAcls.ipRules).Count 0 'Do not add an operator IP exception.'
     Assert-Equal @($resource.properties.networkAcls.virtualNetworkRules).Count 0 'Do not add new networking.'
 }
+
+Test-Case 'APIM policy expressions use only types APIM allows (UriKind is rejected at deployment)' {
+    foreach ($file in Get-ChildItem (Get-RepoPath 'infra/modules/api-management/policies') -Filter *.xml) {
+        Assert-NotMatch (Get-Content $file.FullName -Raw) '\bUriKind\b' "$($file.Name) must not use System.UriKind; APIM validation rejects it."
+    }
+}
+
+Test-Case 'MCP tools are written one at a time (parallel writes on one MCP API fail with PreconditionFailed)' {
+    $bicep = Get-Content (Get-RepoPath 'infra/modules/api-management/main.bicep') -Raw
+    Assert-Match $bicep "@batchSize\(1\)\s*\r?\nresource tools 'Microsoft\.ApiManagement/service/apis/tools@" 'The tools loop must be serial.'
+}

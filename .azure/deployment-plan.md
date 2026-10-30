@@ -576,3 +576,20 @@ API/MCP activation and all live acceptance remain separate gates.
 Ignored `.azure/identity-credential-safety-validation.local.json` retains the
 bounded follow-through evidence. No live credential apply or readiness probe
 was run, and unrelated previously completed suites were not rerun.
+
+## Graph MCP activation stage (2026-10-29)
+
+User approval: deploy the APIM Graph APIs, the native MCP server and a Foundry agent that uses it, with
+signed-in-user (OBO) authentication, into the existing environment (#8).
+
+| Step | Who | Result |
+|---|---|---|
+| Admin consent: gateway `Mail.Read Calendars.Read`; Foundry client `access_as_user` | User | Granted (`AllPrincipals`), read back |
+| Gateway credential (180 days) stored through ARM after the nonsecret write probe | User, `set-graph-credential.ps1` | `graph-obo-client-secret` enabled; probe secret disabled; vault public access still disabled |
+| `graphMcp=true`, `roleAssignments=true`; `azd provision` | Operator | Failed twice, then Succeeded: APIM rejected `System.UriKind` in `rest.xml`; parallel MCP tool writes hit `PreconditionFailed`. Fixed (`new Uri(string)`, `@batchSize(1)`) |
+| APIM state | Operator | REST API `graph-read`, MCP API `graph-mcp` with the four tools, fragments `graph-authenticate`/`graph-obo`, named value `graph-obo-secret` Key Vault status `Success` |
+| Unauthenticated probes | Operator | REST `/graph/messages` 401; MCP `initialize` without token or with an invalid token 401. An unmatched REST path returns 502 with no body |
+| Foundry OAuth connection and agent, `configure-foundry-agent.ps1 -CreateConnection` | User | Connection `graph-mcp-oauth` (OAuth2, `custom_MCP`, gateway scope plus `offline_access`) and agent `graph-mail-calendar` version 1 created; the script then failed reading the agent version (fixed, rerun with `-Apply` completed). The connection reports its `redirectUrl`; credentials are not returned on read |
+| Callback registration on the Foundry app | User, `configure-graph-identity.ps1 -FoundryCallbackUri` | Registered: the app has exactly that one web redirect URI |
+| Agent in the Foundry playground | User | Reported working: consent link, sign-in, approved MCP tool calls returned the user's mail and calendar |
+| Independent confirmation | Operator | Not confirmed: APIM platform `Requests` metrics read afterwards showed only 35 unmatched 404s and none of the earlier 401 probes, so they did not reflect the calls at that time. Two-user isolation, fault and limit tests not run |

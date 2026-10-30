@@ -19,6 +19,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - [Graph MCP deployment, identity, test and recovery runbook](graph-mcp.md) (#6).
 - `configure-foundry-agent.ps1` creates the Foundry custom OAuth connection to the APIM MCP
   server and the `graph-mail-calendar` prompt agent that uses it (#8).
+- Optional `AZURE_NAME_SUFFIX` replaces the derived suffix of globally unique names, so an
+  environment can be deployed again while a deleted vault or Foundry account still holds its
+  names; unset, every name is unchanged (#12).
 
 ### Changed
 - Convention adoption carries preflight's default-off Graph configuration validator,

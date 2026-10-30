@@ -197,6 +197,9 @@ $cachedSubscriptionCode = Get-RequiredEnvironmentValue -Name 'AZURE_SUBSCRIPTION
 if ($environmentName -cnotmatch '^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])$') {
     throw 'AZURE_ENV_NAME must contain 2-32 lowercase alphanumeric or hyphen characters and must start and end with an alphanumeric character.'
 }
+$nameSuffix = (& azd env get-value AZURE_NAME_SUFFIX 2>$null)
+if ($LASTEXITCODE -ne 0) { $nameSuffix = '' }
+$nameSuffix = Assert-NameSuffix -NameSuffix $nameSuffix
 if ($location -cnotmatch '^[a-z0-9]+$') {
     throw "AZURE_LOCATION '$location' is not a valid Azure region name."
 }

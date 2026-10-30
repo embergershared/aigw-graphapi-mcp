@@ -576,3 +576,18 @@ API/MCP activation and all live acceptance remain separate gates.
 Ignored `.azure/identity-credential-safety-validation.local.json` retains the
 bounded follow-through evidence. No live credential apply or readiness probe
 was run, and unrelated previously completed suites were not rerun.
+
+## Graph MCP activation stage (2026-10-29)
+
+User approval: deploy the APIM Graph APIs, the native MCP server and a Foundry agent that uses it, with
+signed-in-user (OBO) authentication, into the existing environment (#8).
+
+| Step | Who | Result |
+|---|---|---|
+| Admin consent: gateway `Mail.Read Calendars.Read`; Foundry client `access_as_user` | User | Granted (`AllPrincipals`), read back |
+| Gateway credential (180 days) stored through ARM after the nonsecret write probe | User, `set-graph-credential.ps1` | `graph-obo-client-secret` enabled; probe secret disabled; vault public access still disabled |
+| `graphMcp=true`, `roleAssignments=true`; `azd provision` | Operator | Failed twice, then Succeeded: APIM rejected `System.UriKind` in `rest.xml`; parallel MCP tool writes hit `PreconditionFailed`. Fixed (`new Uri(string)`, `@batchSize(1)`) |
+| APIM state | Operator | REST API `graph-read`, MCP API `graph-mcp` with the four tools, fragments `graph-authenticate`/`graph-obo`, named value `graph-obo-secret` Key Vault status `Success` |
+| Unauthenticated probes | Operator | REST `/graph/messages` 401; MCP `initialize` without token or with an invalid token 401. An unmatched REST path returns 502 with no body |
+| Foundry OAuth connection, agent, callback registration | User | Pending |
+| Signed-in REST/MCP/agent calls | User | Not run |

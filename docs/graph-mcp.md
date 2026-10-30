@@ -308,7 +308,12 @@ Requery the approved target's full recurring costs and budget before deployment.
 A Log Analytics daily ingestion cap is not a spending cap. Developer bills while
 idle and has no production SLA.
 
-## Live acceptance: all unexecuted
+## Live acceptance: one user, in the playground
+
+On 2026-10-29 the owner reported the agent working in the Foundry playground:
+consent link, sign-in, then approved MCP tool calls returned their own mail and
+calendar. APIM metrics did not confirm the calls when read afterwards, and every
+other row below (denials, two-user isolation, paging, limits) is still unexecuted.
 
 Offline tests exercise the real policy expressions, but cannot prove APIM policy
 support, native authorization/header propagation, real Graph paging, Foundry

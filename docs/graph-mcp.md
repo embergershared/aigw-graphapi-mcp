@@ -109,19 +109,17 @@ not reported as success.
 The credential helper defaults to preparation. Apply checks the selected
 CLI/azd tenant/subscription/region and the owned vault's environment tag,
 RBAC, default-deny firewall and purge protection. An existing credential is
-not recreated. **New credential creation and rotation currently fail closed
-before `addPassword`.** There is no supported mutation-free Set Secret readiness
-proof implemented here; vault metadata, RBAC, token acquisition or successful
-reads do not prove data-plane write reachability/authorization. The
-[Set Secret operation](https://learn.microsoft.com/rest/api/keyvault/secrets/set-secret/set-secret)
-creates a secret/version; it is not a dry-run. A bounded readiness probe, its
-network route and a supported verification implementation require separate
-approval. No helper runs a live probe, accepts a caller's "ready" flag or
-creates a password while this gate is unresolved. Default preparation reports
-`CredentialWriteSupported=false`; approval flags alone do not open the gate.
+not recreated. **The secret is written through ARM**
+(`Microsoft.KeyVault/vaults/secrets`, API `2023-07-01`): the control plane works
+while the vault's public network access stays disabled, so no firewall or
+network change is needed. Before `addPassword`, the helper writes a disabled,
+nonsecret `graph-obo-write-probe` secret through the same route and requires its
+returned version; a failed probe stops with no credential created. The operator
+needs `Microsoft.KeyVault/vaults/secrets/write` on the vault (for example
+Contributor). Default preparation reports `CredentialWriteSupported=true`; Apply
+still needs `-CredentialChangeApproved` and a selected expiry.
 
-The downstream storage boundary is covered with synthetic transport tests only.
-If reached after a future approved readiness implementation, it keeps new values
+The storage boundary is covered with synthetic transport tests. It keeps new values
 in memory/HTTPS, never files, CLI arguments or output, and requires a returned
 version of the intended vault secret before reporting storage success. An HTTP
 failure, timeout, transport failure or unconfirmed response stops without retry
@@ -273,21 +271,23 @@ unverified until the live matrix passes.
    initially no invented Foundry callback. The helper records nonsecret app IDs
    in the selected azd environment without printing them. Obtain downstream Graph
    delegated consent separately, under the tenant's consent policy.
-4. Obtain credential/vault/RBAC approval, select expiry and the owned vault, and
-   resolve the separately approved bounded write-readiness route/probe and its
-   implementation **before** gateway credential creation. The current helper
-   blocks new passwords/rotation while that proof is unavailable. Review operator
+4. Obtain credential/vault/RBAC approval, select expiry and the owned vault, then
+   run `set-graph-credential.ps1 -Apply -CredentialChangeApproved`: its ARM write
+   probe must pass before the gateway password is created. Review operator
    roles before enabling `roleAssignments=true`; the starter also grants configured
    operators vault access. Re-preview the explicit `graphMcp=true` override and deploy its
    protected APIs after approval. Verify Key Vault/RBAC propagation, actual MCP
    URL and both REST/MCP protection. Never register providers implicitly.
-5. After approved model deployment, create the supported Foundry custom OAuth
-   connection in the project using tenant-specific authorize/token endpoints,
-   gateway scope plus `offline_access` (space separated) and encrypted web-client
-   credential. `configure-foundry-oauth.ps1` prepares nonsecret settings only.
-   Register **the returned callback exactly** by rerunning the separately
-   approved identity helper with `-FoundryCallbackUri`.
-6. Configure a prompt agent with exactly four allowed tools, the owned project
+5. After approved model deployment, run `configure-foundry-agent.ps1 -Apply
+   -CreateConnection -CredentialChangeApproved -ExpiresOn <date>`. It adds a
+   password to the owned Foundry app and stores it only in the project's custom
+   OAuth connection (`OAuth2`, tenant-specific authorize/token endpoints, gateway
+   scope plus `offline_access`), created through ARM. It reports the callback
+   the connection returns; if none is returned, copy it from the connection in the
+   Foundry portal. Register **the returned callback exactly** by rerunning the
+   identity helper with `-FoundryCallbackUri`.
+6. The same script creates the prompt agent `graph-mail-calendar` (rerun with
+   `-Apply` alone to update it) with exactly four allowed tools, the owned project
    connection and `require_approval=always`. Verify direct PKCE REST/MCP first,
    then the SDK agent flow. User OAuth consent and every MCP approve/deny are
    independent interactions; do not suppress approval to make a test pass.

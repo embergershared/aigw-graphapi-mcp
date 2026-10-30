@@ -333,3 +333,27 @@ Test-Case 'credential storage confirms the intended version without returning th
     Assert-Equal $result.PreviousCredentialsRemoved $false 'Successful storage is not credential retirement approval.'
     Assert-NotMatch ($result | ConvertTo-Json -Compress) 'synthetic-sensitive-value|synthetic-sensitive-token|secretText' 'Return nonsecret metadata only.'
 }
+
+Test-Case 'Foundry agent plan targets the gateway audience through OAuth and exposes only the four read-only tools (offline)' {
+    $arguments=@{
+        Environment='synthetic';TenantId='00000000-0000-0000-0000-000000000001'
+        GatewayClientId='00000000-0000-0000-0000-000000000002';FoundryClientId='00000000-0000-0000-0000-000000000003'
+        McpServerUrl='https://contoso.azure-api.net/graph-mcp/mcp';ModelDeploymentName='synthetic-model'
+    }
+    $plan=& (Get-RepoPath 'scripts/configure-foundry-agent.ps1') @arguments
+    Assert-Equal $plan.Status 'PreparedOnly' 'Without -Apply nothing is created.'
+    Assert-Equal $plan.Connection.authType 'OAuth2' 'Each user signs in: OAuth identity passthrough.'
+    Assert-Equal ($plan.Connection.scopes -join ' ') 'api://00000000-0000-0000-0000-000000000002/access_as_user offline_access' 'Tokens target the owned gateway audience, refreshable.'
+    Assert-Equal $plan.Connection.authorizationUrl 'https://login.microsoftonline.com/00000000-0000-0000-0000-000000000001/oauth2/v2.0/authorize' 'Tenant-specific authority only.'
+    $tool=$plan.Agent.definition.tools[0]
+    Assert-Equal $tool.type 'mcp' 'The agent uses the APIM MCP server as its tool.'
+    Assert-Equal $tool.project_connection_id 'graph-mcp-oauth' 'The tool authenticates through the OAuth connection.'
+    Assert-Equal ($tool.allowed_tools -join ',') 'list_messages,get_message,list_calendar_view,get_event' 'Only the four read-only tools.'
+    Assert-Equal $tool.require_approval 'always' 'Every MCP call stays an explicit approval.'
+    Assert-Equal $plan.Agent.definition.model 'synthetic-model' 'The selected model deployment.'
+    Assert-NotMatch ($plan | ConvertTo-Json -Depth 10 -Compress) 'clientSecret|secretText|password' 'The plan carries no credential.'
+    $plainHttp=$arguments.Clone(); $plainHttp.McpServerUrl='http://contoso.azure-api.net/graph-mcp/mcp'
+    Assert-Throws {& (Get-RepoPath 'scripts/configure-foundry-agent.ps1') @plainHttp} 'Plain HTTP MCP URLs are rejected.'
+    $sameApp=$arguments.Clone(); $sameApp.FoundryClientId=$arguments.GatewayClientId
+    Assert-Throws {& (Get-RepoPath 'scripts/configure-foundry-agent.ps1') @sameApp} 'The gateway and Foundry apps must differ.'
+}

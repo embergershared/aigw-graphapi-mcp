@@ -17,6 +17,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   separately gated changes, no automatic consent, credential resets or secret output (#6).
 - A .NET SDK verifier and synthetic protocol/policy/configuration regression coverage (#6).
 - [Graph MCP deployment, identity, test and recovery runbook](graph-mcp.md) (#6).
+- `configure-foundry-agent.ps1` creates the Foundry custom OAuth connection to the APIM MCP
+  server and the `graph-mail-calendar` prompt agent that uses it (#8).
 
 ### Changed
 - Convention adoption carries preflight's default-off Graph configuration validator,
@@ -35,3 +37,5 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   implemented. Metadata, tokens and read access are not write-readiness proof.
   Post-create storage failures preserve exact nonsecret recovery metadata and
   never retry, print the value or remove credentials automatically (#6).
+- The gateway credential is stored through ARM, which works with the vault's public
+  network access disabled; a nonsecret ARM write probe runs before `addPassword` (#8).

@@ -224,10 +224,12 @@ Base64 is transport, not secret protection.
 changes requires separate approval and verified CLI/azd target context. Reprovision must
 not rotate credentials. Never grant broad Foundry Contributor access to solve a
 user/consent problem.
-Credential creation/rotation currently fails closed before `addPassword`: no
-mutation-free Set Secret readiness proof is implemented. Do not bypass this with
-metadata, RBAC, tokens or a caller flag; a bounded probe/route and its verification
-need separate approval. Storage failure recovery exposes only nonsecret new-key
+The gateway secret is written through ARM (`Microsoft.KeyVault/vaults/secrets`), which
+works while the vault's public network access stays disabled; never open the vault
+firewall for it. A nonsecret ARM write probe must pass before `addPassword`; do not
+replace it with metadata, RBAC, tokens or a caller flag. `configure-foundry-agent.ps1`
+creates the Foundry OAuth connection (the Foundry app secret goes only into it) and the
+prompt agent. Storage failure recovery exposes only nonsecret new-key
 metadata; never retry creation or remove a credential without explicit authority.
 
 <!-- Add what an agent can't learn quickly from the code: build and run commands, the

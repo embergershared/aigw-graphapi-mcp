@@ -357,3 +357,16 @@ Test-Case 'Foundry agent plan targets the gateway audience through OAuth and exp
     $sameApp=$arguments.Clone(); $sameApp.FoundryClientId=$arguments.GatewayClientId
     Assert-Throws {& (Get-RepoPath 'scripts/configure-foundry-agent.ps1') @sameApp} 'The gateway and Foundry apps must differ.'
 }
+
+Test-Case 'Foundry agent script reads the version from both agent API response shapes' {
+    $tokens=$null; $errors=$null
+    $ast=[System.Management.Automation.Language.Parser]::ParseFile((Get-RepoPath 'scripts/configure-foundry-agent.ps1'),[ref]$tokens,[ref]$errors)
+    $definition=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-AgentVersion'},$true)
+    Assert-True ($null -ne $definition) 'Get-AgentVersion must exist.'
+    . ([scriptblock]::Create($definition.Extent.Text))
+    Set-StrictMode -Version Latest
+    $agent=[pscustomobject]@{object='agent';name='synthetic';versions=[pscustomobject]@{latest=[pscustomobject]@{version='1'}}}
+    Assert-Equal (Get-AgentVersion $agent) '1' 'POST /agents nests the version under versions.latest.'
+    Assert-Equal (Get-AgentVersion ([pscustomobject]@{object='agent.version';version='2'})) '2' 'POST /agents/{name}/versions returns the version itself.'
+    Assert-Equal (Get-AgentVersion ([pscustomobject]@{object='agent'})) '' 'A response without a version reports none instead of failing.'
+}

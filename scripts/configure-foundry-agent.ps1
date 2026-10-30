@@ -35,6 +35,19 @@ $settings = @{
     CredentialName       = 'graph-mcp-foundry-oauth'
 }
 
+# POST /agents returns the agent with versions.latest.version; POST /agents/{name}/versions returns the version.
+function Get-AgentVersion($Response) {
+    if ($null -eq $Response) { return '' }
+    $versions = $Response.PSObject.Properties['versions']
+    if ($versions -and $versions.Value -and $versions.Value.PSObject.Properties['latest']) {
+        $latest = $versions.Value.latest
+        if ($latest -and $latest.PSObject.Properties['version']) { return [string]$latest.version }
+    }
+    $version = $Response.PSObject.Properties['version']
+    if ($version) { return [string]$version.Value }
+    return ''
+}
+
 function Get-EnvValue([string] $Name) {
     $value = & azd env get-value $Name -e $Environment 2>$null
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($value)) { throw "azd environment '$Environment' has no $Name." }
@@ -160,8 +173,7 @@ try {
             -ContentType 'application/json' -Body $version -TimeoutSec $script:GraphIdentitySettings.RequestTimeoutSeconds -ErrorAction Stop
     }
     $result.AgentName = $AgentName
-    $result.AgentVersion = [string]$created.version
-    if (-not $result.AgentVersion -and $created.PSObject.Properties['versions']) { $result.AgentVersion = [string]$created.versions.latest.version }
+    $result.AgentVersion = Get-AgentVersion $created
 } finally {
     $armToken = $null
     $agentToken = $null

@@ -253,6 +253,8 @@ resource mcpPolicy 'Microsoft.ApiManagement/service/apis/policies@2025-09-01-pre
   ]
 }
 
+// One at a time: parallel tool writes on the same MCP API fail with PreconditionFailed.
+@batchSize(1)
 resource tools 'Microsoft.ApiManagement/service/apis/tools@2025-09-01-preview' = [
   for tool in contract.tools: if (configureGraph) {
     parent: mcpApi

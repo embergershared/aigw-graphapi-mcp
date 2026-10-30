@@ -20,7 +20,9 @@ defaults are preserved but not a supported Graph PoC configuration. No VM,
 Bastion, NAT, storage, private endpoints/DNS, Function, container, separate MCP
 process, toolbox or hosted agent application is added. There are no writes,
 application permissions, shared mailboxes, attachments or arbitrary Graph proxy.
-Tenant registrations/grants are not resource-group resources.
+Tenant registrations/grants are not resource-group resources. The optional
+[Teams publication](#publish-to-teams-and-microsoft-365-copilot) adds an Azure Bot
+Service resource that the Foundry portal creates, not the Bicep.
 
 ## Public tool contract
 
@@ -291,6 +293,9 @@ unverified until the live matrix passes.
    connection and `require_approval=always`. Verify direct PKCE REST/MCP first,
    then the SDK agent flow. User OAuth consent and every MCP approve/deny are
    independent interactions; do not suppress approval to make a test pass.
+7. Optionally, after the playground and direct tests pass, publish the agent to
+   Teams and Microsoft 365 Copilot under separate approval; see
+   [Publish to Teams and Microsoft 365 Copilot](#publish-to-teams-and-microsoft-365-copilot).
 
 Keep `azure-prepare` -> `azure-validate` -> `azure-deploy`. Native MCP has no azd
 application service to package/deploy: record that packaging is not applicable
@@ -338,6 +343,83 @@ policy/header forwarding, CA, OAuth or the selected client contract fails, stop
 at that exact gate. Do not silently substitute shared/app-only credentials,
 a custom broker/server or native response buffering.
 
+## Publish to Teams and Microsoft 365 Copilot
+
+Publishing exposes the **same** `graph-mail-calendar` agent, connection and MCP
+tools in Teams and Microsoft 365 Copilot. It changes no APIM, Key Vault or
+identity-helper setting, and is not part of `azd provision`. Publish only after
+the playground and direct tests pass, under its own approval: it lists the agent
+in the tenant's agent store and sends conversation content to Microsoft 365.
+
+### Prerequisites
+
+| Item | Requirement |
+|---|---|
+| Agent identity | The agent has its own identity (`instance_identity` on `GET {project endpoint}/agents/<name>?api-version=v1`). Agents created by `configure-foundry-agent.ps1` through the v1 agents API have one; an older-format agent must be migrated first |
+| Resource provider | `Microsoft.BotService` registered in the subscription; the template's preflight does not check it |
+| Publisher | **Foundry User** on the project (agent write), plus `Microsoft.BotService/botServices/write` and `channels/write` on the resource group: **Azure Bot Service Contributor Role**, Contributor or Owner. Foundry roles do not grant the Bot Service permissions |
+| Users | Members of the project's tenant (guests are refused), with **Foundry Agent Consumer** on the project for OAuth passthrough, a Teams license and an Exchange Online mailbox |
+| Network | Users' networks allow HTTPS to `*.azureml.ms` for the sign-in redirect |
+
+Grant Foundry Agent Consumer to a group rather than to single users. It is the
+least-privileged role for OAuth passthrough; do not grant Foundry User or
+Contributor to agent users.
+
+### Publish
+
+In the Foundry portal, on the project:
+
+1. Open the agent, **Details** > **Active version**: pin the tested version, or
+   keep **Always use latest** so a new version reaches Teams without republishing.
+2. **Publish** > **Teams and Microsoft Copilot**. Foundry creates an Azure Bot
+   Service resource (F0, global) in the project's resource group, or shows the
+   existing one.
+3. Enter the display name, a three-part publish version (`1.0.0`), short and full
+   descriptions and the developer name. These fields are shown to users: no
+   identifiers, URLs to internal systems or secrets.
+4. **Next: Publish options** > **Direct publish**, choose the scope, **Publish**.
+   **Download & customize** instead returns the validated Teams app package to
+   upload by hand; change only user-facing metadata and icons in it.
+
+| Scope (portal / REST `publishScope`) | Authorization scheme | Who can call the agent | Approval |
+|---|---|---|---|
+| **Just you** / `Shared` | `BotServiceRbac` | The publisher, and users the link is shared with who hold the project role | None |
+| **People in your organization** / `Tenant` | `BotServiceTenant` | Every member of the tenant | A Microsoft 365 admin approves it in the admin center (**Agents** > **Requests**) |
+
+Start with **Just you**. `BotServiceTenant` lets any tenant member reach the
+agent, but the MCP tools still require each user's own OAuth consent and Foundry
+Agent Consumer. The REST equivalent (Bot Service Bicep, agent endpoint update and
+`POST {project endpoint}/agents/<name>/microsoft365/publish?api-version=v1`) is in
+the Microsoft Learn REST article; the project here keeps public network access,
+so `enable_m365_public_endpoint` is not needed.
+
+### In Teams
+
+The agent appears under **Your agents** (`Shared`) or, after approval, **Built by
+your org** (`Tenant`); the store cache can take about an hour. The first tool use
+shows a sign-in card: the same OAuth consent as in the playground, through the
+same connection and registered callback. Each MCP call then shows an approval
+card, because `require_approval=always` stays on. A dismissed approval or a tool
+error can lock the conversation; send `/foundry_new_preview` in Teams to start a
+new one.
+
+Published agents do not stream responses or show citations. Updating the store
+metadata needs a higher publish version (**Publish** > **Update agent Teams and
+Microsoft Copilot display properties**); changing the agent's behavior needs only
+a new agent version.
+
+### What publishing adds
+
+| Added | Where | Removed by `azd down` |
+|---|---|---|
+| Azure Bot Service resource | The azd resource group, created by the portal, not by the Bicep; `azd provision` leaves it alone | Yes, with the resource group |
+| `activity` protocol and Bot Service authorization scheme | The agent endpoint | No; deleted with the Foundry project |
+| Teams app and agent store entry | The Microsoft 365 tenant | No |
+| Conversation content | Microsoft 365 and Teams, under their terms and retention, as well as Foundry | No |
+
+Review data handling before publishing an agent that reads real mailboxes: the
+synthetic-only acceptance terms above no longer bound what users send or see.
+
 ## Recovery and teardown
 
 Retain previous REST revisions/policies, native tool definitions and agent
@@ -348,8 +430,14 @@ value and OBO, then separately approve removal of the prior credential.
 Connection disable, user revocation and credential removal need operational
 authority; the helpers do not silently perform them.
 
+For a published agent, disabling the connection stops its tools in Teams too.
+Deleting the Bot Service resource stops message delivery from Teams and Microsoft
+365 Copilot; a Microsoft 365 admin removes an organization-scope agent from the
+store in the admin center.
+
 Teardown requires separate approval and an inventory of **both** owned Azure
-resources and tenant apps, grants and Foundry conversations. Deleting the RG
+resources and tenant apps, grants and Foundry conversations, plus the Teams app
+and Microsoft 365 conversations of a published agent. Deleting the RG
 does not remove tenant identities or necessarily retained conversations.
 Key Vault soft delete/purge protection can retain secrets/reserve names.
 Profile/flag disablement in an incremental deployment is not deletion and may
@@ -366,6 +454,9 @@ leave billable resources. Never broadly delete a tenant, subscription or shared 
   [Entra OBO](https://learn.microsoft.com/entra/identity-platform/v2-oauth2-on-behalf-of-flow).
 - [Foundry MCP authentication/roles](https://learn.microsoft.com/azure/foundry/agents/how-to/mcp-authentication),
   [MCP tools and SDK](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/model-context-protocol).
+- [Publish to Teams and Microsoft 365 Copilot (portal)](https://learn.microsoft.com/azure/foundry/agents/how-to/publish-copilot),
+  [REST API](https://learn.microsoft.com/azure/foundry/agents/how-to/publish-copilot-virtual-network),
+  [troubleshooting](https://learn.microsoft.com/azure/foundry/agents/how-to/troubleshoot-publish-copilot).
 - [Graph messages](https://learn.microsoft.com/graph/api/user-list-messages?view=graph-rest-1.0),
   [calendar view](https://learn.microsoft.com/graph/api/calendar-list-calendarview?view=graph-rest-1.0).
 - [Azure Retail Pricing API](https://learn.microsoft.com/rest/api/cost-management/retail-prices/azure-retail-prices).

@@ -230,6 +230,33 @@ Test-Case 'globally unique names keep prefix, location, subscription and hash' {
     }
 }
 
+Test-Case 'an explicit AZURE_NAME_SUFFIX replaces the derived suffix, and unset keeps it' {
+    $template = Get-CompiledTemplate -BicepPath (Get-RepoPath 'infra\main.bicep')
+
+    # Unset must keep the exact pre-override derivation, or every deployed environment would be renamed.
+    Assert-Equal -Actual $template.variables.derivedNameSuffix `
+        -Expected "[take(uniqueString(subscription().id, parameters('environmentName'), parameters('location')), 3)]" `
+        -Message 'The derived suffix must stay take(uniqueString(subscription, environment, location), 3).'
+    Assert-Equal -Actual $template.parameters.nameSuffix.defaultValue -Expected '' -Message 'The override must default to empty.'
+    Assert-Equal -Actual $template.parameters.nameSuffix.maxLength -Expected 3 -Message 'The override must stay 3 characters.'
+    $parameters = Get-Content -LiteralPath (Get-RepoPath 'infra\main.parameters.json') -Raw | ConvertFrom-Json
+    Assert-Equal -Actual $parameters.parameters.nameSuffix.value -Expected '${AZURE_NAME_SUFFIX=}' `
+        -Message 'An environment that never sets AZURE_NAME_SUFFIX must pass an empty override.'
+
+    $suffix = Invoke-ArmExpression -Expression $template.variables.shortUniqueSuffix -Template $template `
+        -Parameters @{ nameSuffix = 'x7k' } -Variables @{ derivedNameSuffix = 'abc' }
+    Assert-Equal -Actual $suffix -Expected 'x7k' -Message 'A set override must replace the derived suffix.'
+    $suffix = Invoke-ArmExpression -Expression $template.variables.shortUniqueSuffix -Template $template `
+        -Parameters @{ nameSuffix = '' } -Variables @{ derivedNameSuffix = 'abc' }
+    Assert-Equal -Actual $suffix -Expected 'abc' -Message 'An empty override must keep the derived suffix.'
+
+    Assert-Equal -Actual (Assert-NameSuffix -NameSuffix '') -Expected '' -Message 'Unset is valid.'
+    Assert-Equal -Actual (Assert-NameSuffix -NameSuffix ' x7k ') -Expected 'x7k' -Message 'A valid suffix is returned trimmed.'
+    foreach ($invalid in @('X7K', 'x7', 'x7k1', 'x-k', 'x_k')) {
+        Assert-Throws -Action { Assert-NameSuffix -NameSuffix $invalid } -Message "Suffix '$invalid' must be rejected."
+    }
+}
+
 Test-Case 'platform-managed resource groups are the owning resource group name plus -managed' {
     $namingBicep = Get-Content -LiteralPath (Get-RepoPath 'infra/core/naming.bicep') -Raw
     Assert-True ($namingBicep -cmatch "func managedResourceGroupName\(resourceGroupName string\) string => '\$\{resourceGroupName\}-managed'") `

@@ -32,6 +32,9 @@
     "enableKeyVaultPurgeProtection": {
       "value": "${AZURE_KEY_VAULT_PURGE_PROTECTION=true}"
     },
+    "nameSuffix": {
+      "value": "${AZURE_NAME_SUFFIX=}"
+    },
     "apimPublisherName": {
       "value": "${APIM_PUBLISHER_NAME=}"
     },

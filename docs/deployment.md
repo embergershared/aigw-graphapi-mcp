@@ -367,3 +367,5 @@ azd down -e <environment>
 
 Review and confirm the destructive plan. Verify the resource group is gone and
 check for soft-deleted/purge-protected Key Vault state and any retained charges.
+A soft-deleted vault or Foundry account keeps its name, so deploying the same
+environment again needs a new [name suffix](configuration.md#the-name-suffix-of-globally-unique-names).

@@ -122,6 +122,10 @@ param enableRoleAssignments bool = true
 @description('Turn on Key Vault purge protection. Off only for throwaway environments, such as pull request deployments, whose vault must be purged on teardown. It cannot be turned off on a vault that already has it.')
 param enableKeyVaultPurgeProtection bool = true
 
+@description('Optional 3 lowercase letters or digits that replace the derived suffix of globally unique names (Key Vault, APIM, Foundry account, Windows computer name). Empty keeps take(uniqueString(subscription, environment, location), 3). Use it when a deleted environment still holds those names, such as a purge-protected vault.')
+@maxLength(3)
+param nameSuffix string = ''
+
 @description('Base64-encoded JSON profile overrides. Supported keys: network, keyVault, storage, bastion, windowsVm, linuxVm, natGateway, entraLogin, shutdownSchedules, roleAssignments, apiManagement, aiFoundry, graphMcp. Public Graph MCP requires core, apiManagement, keyVault and roleAssignments with no network.')
 param featureOverridesBase64 string = 'e30='
 
@@ -188,7 +192,8 @@ param shutdownTimeZone string = 'Eastern Standard Time'
 // Resolved from infra/core/tenant-codes.json; an unlisted tenant fails here and in preflight.
 var tenantCode = tenantCodeFor(tenant().tenantId)
 var locationCode = locationCodeFor(location)
-var shortUniqueSuffix = take(uniqueString(subscription().id, environmentName, location), 3)
+var derivedNameSuffix = take(uniqueString(subscription().id, environmentName, location), 3)
+var shortUniqueSuffix = empty(nameSuffix) ? derivedNameSuffix : nameSuffix
 
 var apiManagementName = globalName(
   abbreviations.apiManagement,

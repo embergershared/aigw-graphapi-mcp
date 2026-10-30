@@ -22,6 +22,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - [Publishing the agent to Teams and Microsoft 365 Copilot](graph-mcp.md#publish-to-teams-and-microsoft-365-copilot):
   prerequisites, roles, scopes, what users see and what publishing adds outside the Bicep; and
   [what the Graph workload needs in another tenant](deployment.md#deploy-to-another-tenant-or-subscription) (#10).
+- Optional `AZURE_NAME_SUFFIX` replaces the derived suffix of globally unique names, so an
+  environment can be deployed again while a deleted vault or Foundry account still holds its
+  names; unset, every name is unchanged (#12).
 
 ### Changed
 - Convention adoption carries preflight's default-off Graph configuration validator,

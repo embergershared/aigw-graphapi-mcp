@@ -52,6 +52,7 @@ and rollback/recovery; changing profiles does not guarantee deletion.
 | `AZURE_OPERATOR_PRINCIPAL_IDS` | Comma-separated Entra user/group object IDs: the accounts that sign in to the jumpboxes; `scripts/add-operator.ps1` resolves names and appends | when a VM or role assignments are enabled |
 | `AZURE_FEATURE_OVERRIDES_JSON` | Expert feature object; hook defaults to `{}` | optional |
 | `AZURE_KEY_VAULT_PURGE_PROTECTION` | `true` (default) or `false`. Set `false` only for throwaway environments that must purge their vault on teardown, as the [pull request deployments](ci-deployment.md) do. A vault that has purge protection keeps it | optional |
+| `AZURE_NAME_SUFFIX` | Exactly 3 lowercase letters or digits that replace the derived suffix of globally unique names; unset keeps the derived one. See [the name suffix](#the-name-suffix-of-globally-unique-names) | optional |
 
 `AZURE_OPERATOR_PRINCIPAL_IDS` is only required when the deployment grants VM
 sign-in or data-plane roles — that is, the `full` profile or an override that
@@ -231,6 +232,32 @@ encode custom resource names in AZD environment values. Changing a prefix or
 suffix replaces resources whose Azure names are immutable, so review the preview
 for data migration, retained resources, downtime, and additional cost before
 provisioning an existing environment.
+
+### The name suffix of globally unique names
+
+Key Vault, API Management, the Foundry account and the Windows computer name must
+be unique across Azure, so they end with a 3-character suffix,
+`take(uniqueString(subscription, environment, location), 3)`. It does not change
+while the environment, subscription and region stay the same, so after a teardown
+the same environment asks for the same names. Those names can still be held:
+a deleted Key Vault stays soft-deleted, and with purge protection cannot be purged
+until its retention ends; a deleted Foundry account keeps its custom subdomain until
+it is purged. Provisioning then fails preflight, for example with
+`CustomDomainInUse`.
+
+Set `AZURE_NAME_SUFFIX` to replace the suffix. Pick a value whose names are free
+before provisioning (`az keyvault check-name`, `az apim check-name`, and the
+Cognitive Services `checkDomainAvailability` API for the Foundry subdomain), then
+preview:
+
+```powershell
+azd env set AZURE_NAME_SUFFIX 9h3
+azd provision --preview -e <environment>
+```
+
+Preflight rejects anything but 3 lowercase letters or digits. Leave it unset on an
+environment that is already deployed: setting or changing it renames, and therefore
+replaces, those four resources.
 
 `infra/core/tenant-codes.json` maps each Entra tenant ID to a display name and a
 short code. It is gitignored and local to each clone, which starts it from

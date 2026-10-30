@@ -214,6 +214,11 @@ Preserve APIM's explicit transport/legacy-portal restrictions and the gateway
 vault's disabled public network access with its default-deny trusted-service
 firewall; never silently open access during provisioning or credential setup.
 
+Globally unique names end with `take(uniqueString(subscription, environment,
+location), 3)` unless `AZURE_NAME_SUFFIX` (3 lowercase letters/digits) replaces it.
+Never change that derivation: it would rename deployed environments. Set the
+override only when a deleted environment's names are still held.
+
 Keep `FOUNDRY_DEPLOYMENTS_JSON` as the user-selected source value. The preprovision
 tag hook derives `FOUNDRY_DEPLOYMENTS_BASE64` for azd interpolation, like feature
 overrides; never substitute raw quoted JSON into `infra/main.parameters.json`.

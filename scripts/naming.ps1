@@ -66,6 +66,22 @@ function Assert-SubscriptionCode {
     return $derivedCode
 }
 
+# An explicit AZURE_NAME_SUFFIX replaces the derived 3-character suffix of globally
+# unique names; '' keeps the derived one. Returns the validated value.
+function Assert-NameSuffix {
+    param(
+        [AllowEmptyString()]
+        [string] $NameSuffix = ''
+    )
+
+    $value = ([string] $NameSuffix).Trim()
+    if ($value -and $value -cnotmatch '^[a-z0-9]{3}$') {
+        throw "AZURE_NAME_SUFFIX '$value' must be exactly 3 lowercase letters or digits, or unset to keep the derived suffix."
+    }
+
+    return $value
+}
+
 # The subscription the Azure CLI is signed in to, or '' when there is none.
 function Get-ActiveSubscriptionId {
     $active = & az account show --query id --output tsv --only-show-errors 2>$null

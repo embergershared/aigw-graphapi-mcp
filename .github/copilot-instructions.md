@@ -231,6 +231,11 @@ replace it with metadata, RBAC, tokens or a caller flag. `configure-foundry-agen
 creates the Foundry OAuth connection (the Foundry app secret goes only into it) and the
 prompt agent. Storage failure recovery exposes only nonsecret new-key
 metadata; never retry creation or remove a credential without explicit authority.
+Publishing the agent to Teams/Microsoft 365 Copilot is a separately approved
+portal step outside azd; its Azure Bot Service resource is not in the Bicep.
+Agent users get Foundry Agent Consumer on the project, never Foundry User or
+Contributor. The Graph workload runs per tenant: a new tenant repeats the identity,
+consent, credential and agent stages with a member account of that tenant.
 
 <!-- Add what an agent can't learn quickly from the code: build and run commands, the
      architecture in a few lines, domain terms, where logs go, and known gotchas. -->

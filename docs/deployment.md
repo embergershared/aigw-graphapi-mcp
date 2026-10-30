@@ -201,6 +201,22 @@ subscription. To target another one:
    reports unregistered providers with the commands that register them, and
    registers them only when run by hand with `-RegisterProviders`; see
    [resource providers](#resource-providers).
+6. **Graph workload: redo the tenant steps.** App registrations, consent, the
+   gateway credential, the Foundry connection and agent, and any Teams
+   publication belong to one tenant, so run the
+   [Graph MCP stages](graph-mcp.md#separately-approved-live-stages) again in the
+   new environment. Also:
+   - Sign both CLIs in with a **member** account of the new tenant. An account
+     from another tenant can still read the subscription through ARM, but it gets
+     no Microsoft Graph token there, and Foundry OAuth passthrough and Teams
+     refuse guests.
+   - Set `azd env set AZURE_TENANT_ID <tenant-guid>`: the identity, credential
+     and agent helpers refuse to apply changes until it matches the Azure CLI.
+   - Select the new environment (`azd env select <environment>`) before
+     `set-deployment-tags.ps1`, which reads the selected environment, and check
+     that it seeded `AZURE_OPERATOR_PRINCIPAL_IDS` with your account in the new
+     tenant.
+   - Check the selected model's quota in the new subscription and region.
 
 ## 2. Validate
 

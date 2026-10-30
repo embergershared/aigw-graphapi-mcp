@@ -19,6 +19,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - [Graph MCP deployment, identity, test and recovery runbook](graph-mcp.md) (#6).
 - `configure-foundry-agent.ps1` creates the Foundry custom OAuth connection to the APIM MCP
   server and the `graph-mail-calendar` prompt agent that uses it (#8).
+- [Publishing the agent to Teams and Microsoft 365 Copilot](graph-mcp.md#publish-to-teams-and-microsoft-365-copilot):
+  prerequisites, roles, scopes, what users see and what publishing adds outside the Bicep; and
+  [what the Graph workload needs in another tenant](deployment.md#deploy-to-another-tenant-or-subscription) (#10).
 - Optional `AZURE_NAME_SUFFIX` replaces the derived suffix of globally unique names, so an
   environment can be deployed again while a deleted vault or Foundry account still holds its
   names; unset, every name is unchanged (#12).

@@ -1,5 +1,7 @@
 Set-StrictMode -Version Latest
-$script:GraphIdentitySettings = @{RequestTimeoutSeconds=30;VaultSecretsApiVersion='7.4'}
+# Secrets are written through ARM (Microsoft.KeyVault/vaults/secrets): the control plane works while the
+# vault's public network access stays disabled, unlike the vault.azure.net data plane.
+$script:GraphIdentitySettings = @{RequestTimeoutSeconds=30;KeyVaultArmApiVersion='2023-07-01';WriteProbeSecretName='graph-obo-write-probe'}
 
 function Get-GraphIdentityPlan {
     [CmdletBinding()]
@@ -135,10 +137,52 @@ function Get-OwnedGraphApplication {
     return $matches[0]
 }
 
+function Get-GraphVaultSecretArmUri {
+    param([guid] $SubscriptionId, [string] $ResourceGroupName, [string] $VaultName, [string] $SecretName)
+    "https://management.azure.com/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.KeyVault/vaults/$VaultName/secrets/${SecretName}?api-version=$($script:GraphIdentitySettings.KeyVaultArmApiVersion)"
+}
+
+# Returns the confirmed version URI of the intended secret from an ARM secret response, or $null.
+function Get-GraphStoredSecretVersion {
+    param($Stored, [string] $VaultName, [string] $SecretName)
+    $properties=if($null -ne $Stored){$Stored.PSObject.Properties['properties']}else{$null}
+    $returned=if($properties -and $null -ne $properties.Value){$properties.Value.PSObject.Properties['secretUriWithVersion']}else{$null}
+    $versionUri=$null
+    $prefix="/secrets/$SecretName/"
+    if (-not $returned -or -not [uri]::TryCreate([string]$returned.Value,[UriKind]::Absolute,[ref]$versionUri) -or
+        $versionUri.Scheme -cne 'https' -or $versionUri.Host -ine "$VaultName.vault.azure.net" -or
+        -not $versionUri.IsDefaultPort -or $versionUri.UserInfo -or $versionUri.Query -or $versionUri.Fragment -or
+        -not $versionUri.AbsolutePath.StartsWith($prefix,[StringComparison]::Ordinal) -or
+        -not $versionUri.AbsolutePath.Substring($prefix.Length) -or
+        $versionUri.AbsolutePath.Substring($prefix.Length).Contains('/')) {
+        return $null
+    }
+    return $versionUri
+}
+
 function Assert-GraphCredentialStorageReady {
     [CmdletBinding()]
-    param()
-    throw 'Credential creation/rotation is blocked before addPassword: this helper has no supported mutation-free proof of Key Vault Set Secret reachability and write authorization. Vault metadata, RBAC, tokens and successful reads are not that proof. A bounded data-plane readiness probe and its network route require separate approval and implementation; no probe or credential was created.'
+    param(
+        [Parameter(Mandatory)] [guid] $SubscriptionId,
+        [Parameter(Mandatory)] [string] $ResourceGroupName,
+        [Parameter(Mandatory)] [string] $VaultName,
+        [Parameter(Mandatory)] [string] $ArmToken
+    )
+    # Writes a nonsecret probe through the same ARM route before any credential exists, so a missing
+    # route or write permission stops before addPassword.
+    $probe=$script:GraphIdentitySettings.WriteProbeSecretName
+    $body=@{properties=@{value="probe-$([guid]::NewGuid())";attributes=@{enabled=$false}}} | ConvertTo-Json -Compress
+    $stored=$null
+    try {
+        $stored=Invoke-RestMethod -Method Put -Uri (Get-GraphVaultSecretArmUri $SubscriptionId $ResourceGroupName $VaultName $probe) `
+            -Headers @{Authorization="Bearer $ArmToken"} -ContentType 'application/json' -Body $body `
+            -TimeoutSec $script:GraphIdentitySettings.RequestTimeoutSeconds -ErrorAction Stop
+    } catch {
+        throw 'Credential creation/rotation is blocked before addPassword: the Key Vault write probe through ARM failed, so the secret could not be stored. No credential was created.'
+    }
+    if ($null -eq (Get-GraphStoredSecretVersion $stored $VaultName $probe)) {
+        throw 'Credential creation/rotation is blocked before addPassword: the Key Vault write probe through ARM returned no confirmed version. No credential was created.'
+    }
 }
 
 function Save-GraphCredentialVaultCopy {
@@ -146,10 +190,12 @@ function Save-GraphCredentialVaultCopy {
     param(
         [Parameter(Mandatory)] [guid] $ApplicationObjectId,
         [Parameter(Mandatory)] [psobject] $Credential,
+        [Parameter(Mandatory)] [guid] $SubscriptionId,
+        [Parameter(Mandatory)] [string] $ResourceGroupName,
         [Parameter(Mandatory)] [string] $VaultName,
         [Parameter(Mandatory)] [string] $SecretName,
         [Parameter(Mandatory)] [DateTimeOffset] $ExpiresOn,
-        [Parameter(Mandatory)] [string] $VaultToken
+        [Parameter(Mandatory)] [string] $ArmToken
     )
     $secretUri="https://$VaultName.vault.azure.net/secrets/$SecretName"
     $keyId=$Credential.PSObject.Properties['keyId']
@@ -175,10 +221,10 @@ function Save-GraphCredentialVaultCopy {
             -not [guid]::TryParse([string]$keyId.Value,[ref]$parsedKeyId) -or $parsedKeyId -eq [guid]::Empty) {
             $failure='The application credential response did not contain both a value and a usable key ID; reconcile the application before retrying.'
         } else {
-            $body=@{value=$secret.Value;attributes=@{enabled=$true;exp=$ExpiresOn.ToUnixTimeSeconds()}} | ConvertTo-Json -Compress
+            $body=@{properties=@{value=$secret.Value;attributes=@{enabled=$true;exp=$ExpiresOn.ToUnixTimeSeconds()}}} | ConvertTo-Json -Compress
             try {
-                $stored=Invoke-RestMethod -Method Put -Uri "${secretUri}?api-version=$($script:GraphIdentitySettings.VaultSecretsApiVersion)" `
-                    -Headers @{Authorization="Bearer $VaultToken"} -ContentType 'application/json' -Body $body `
+                $stored=Invoke-RestMethod -Method Put -Uri (Get-GraphVaultSecretArmUri $SubscriptionId $ResourceGroupName $VaultName $SecretName) `
+                    -Headers @{Authorization="Bearer $ArmToken"} -ContentType 'application/json' -Body $body `
                     -TimeoutSec $script:GraphIdentitySettings.RequestTimeoutSeconds -ErrorAction Stop
             } catch [Microsoft.PowerShell.Commands.HttpResponseException] {
                 $failure="Vault storage failed with HTTP $([int]$_.Exception.Response.StatusCode)."
@@ -188,15 +234,8 @@ function Save-GraphCredentialVaultCopy {
                 $failure='Vault transport failed; its outcome is uncertain.'
             }
             if (-not $failure) {
-                $returnedId=if($null -ne $stored){$stored.PSObject.Properties['id']}else{$null}
-                $versionUri=$null
-                $prefix="/secrets/$SecretName/"
-                if (-not $returnedId -or -not [uri]::TryCreate([string]$returnedId.Value,[UriKind]::Absolute,[ref]$versionUri) -or
-                    $versionUri.Scheme -cne 'https' -or $versionUri.Host -ine "$VaultName.vault.azure.net" -or
-                    -not $versionUri.IsDefaultPort -or $versionUri.UserInfo -or $versionUri.Query -or $versionUri.Fragment -or
-                    -not $versionUri.AbsolutePath.StartsWith($prefix,[StringComparison]::Ordinal) -or
-                    -not $versionUri.AbsolutePath.Substring($prefix.Length) -or
-                    $versionUri.AbsolutePath.Substring($prefix.Length).Contains('/')) {
+                $versionUri=Get-GraphStoredSecretVersion $stored $VaultName $SecretName
+                if ($null -eq $versionUri) {
                     $failure='Vault storage returned no confirmed version of the intended secret; its outcome is uncertain.'
                 }
             }
@@ -222,7 +261,7 @@ function Save-GraphCredentialVaultCopy {
         $stored=$null
         $secret=$null
         $Credential=$null
-        $VaultToken=$null
+        $ArmToken=$null
     }
 }
 

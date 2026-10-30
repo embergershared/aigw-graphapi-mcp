@@ -73,6 +73,7 @@ $payload = @(
     'infra/core/tenant-codes.example.json'
     'scripts/naming.ps1'
     'scripts/preflight.ps1'
+    'scripts/graph-configuration.ps1'
     'scripts/module-selection.ps1'
     'scripts/set-deployment-tags.ps1'
     'scripts/build-catalog.ps1'

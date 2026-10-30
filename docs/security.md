@@ -10,7 +10,7 @@ deploying:
 
 | Profile | Security posture |
 |---|---|
-| `core` | No network is created, so there is no private DNS and no private endpoint. Any catalog module you add deploys public-with-firewall. Managed identity, Entra RBAC, disabled shared keys and disabled local authentication still apply. |
+| `core` | No network is created, so there is no private DNS and no private endpoint. Catalog modules normally use public-with-firewall; the Graph gateway vault instead keeps public access Disabled with its trusted-service exception. Managed identity, Entra RBAC, disabled shared keys and disabled local authentication still apply. |
 | `private` | Private endpoints and VNet-linked private DNS for every module that supports Private Link; public network access disabled on those services. |
 | `full` | Everything in `private`, plus the brokered administration path and the approved public exceptions below. |
 
@@ -27,10 +27,42 @@ on a service firewall alone.
 | NAT public IP in `full` | Entra VM extension/bootstrap egress | Jumpbox subnet association only; outbound-only |
 | Azure Monitor public ingestion/query | Keep Log Analytics and Application Insights usable without private link | Local authentication disabled; Entra authorization and resource-scoped access remain required |
 | Public-with-firewall services in `core` | The profile deploys no VNet to put an endpoint in | Service firewall plus Entra RBAC; no shared keys; step up to `private` when that is not enough |
+| Public APIM Developer and Foundry for the Graph PoC | User-approved HTTPS/custom OAuth integration | Default-off opt-ins on `core`; tenant-specific delegated Entra protection on REST and MCP; no key-only bypass |
 
 Any additional public endpoint, firewall bypass, or broad NSG rule requires a
 documented security decision and validation. Azure Monitor public access is an
 intentional exception and organizational policy may reject it.
+
+## Delegated Graph boundary
+
+Only the signed-in user's `Mail.Read` and `Calendars.Read` are declared. There
+are no Graph writes, app permissions, shared mailboxes, attachments or generic
+proxy routes. A validated v2 token for our gateway must carry `access_as_user`,
+the approved tenant/audience/caller and a user object ID. OBO alone exchanges
+it for Graph; no gateway token is forwarded as the Graph bearer and no managed
+identity stands in for a user.
+
+The APIM system identity has secret-scoped Key Vault Secrets User access to the
+versionless named value. The vault remains RBAC/deny-by-default/purge-protected;
+trusted-service integration does not grant an operator firewall exception.
+The gateway composition keeps vault public network access Disabled and no
+IP/VNet allowlist rules. The resource-only stage creates no secret-reader roles
+or credential references; those belong to the separately approved API stage.
+Credential creation and rotation are explicit, not provision hooks. Restrict
+policy editing/tracing: an administrator able to change policies could exfiltrate
+assertions or the OBO credential.
+
+APIM logs metrics only. Frontend/backend bodies are zero bytes, header lists
+empty, client IP logging off and sampling zero on the all-APIs diagnostic.
+No token/response caching or payload traces are configured. These settings are
+not a Foundry retention policy: mailbox content can persist in conversations.
+Use synthetic fixtures and never publish tokens, consent links, IDs, mailbox
+content or user-identifying screenshots. Treat returned text as untrusted data,
+never instructions; do not render active HTML or follow its links.
+
+See [Graph MCP](graph-mcp.md) for consent vs tool approvals, two-user isolation,
+the byte boundary and recovery. Public/preview/data-handling approval remains
+necessary before live use.
 
 ## Private DNS
 

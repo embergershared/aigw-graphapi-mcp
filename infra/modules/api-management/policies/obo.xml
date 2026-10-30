@@ -1,0 +1,87 @@
+<fragment>
+  <send-request mode="new" response-variable-name="oboResponse" timeout="@@OBO_TIMEOUT@@" ignore-error="true">
+    <set-url>https://login.microsoftonline.com/{{gateway-tenant-id}}/oauth2/v2.0/token</set-url>
+    <set-method>POST</set-method>
+    <set-header name="Content-Type" exists-action="override"><value>application/x-www-form-urlencoded</value></set-header>
+    <set-body>@{
+      return "client_id=" + Uri.EscapeDataString("{{gateway-client-id}}")
+        + "&amp;client_secret=" + Uri.EscapeDataString("{{graph-obo-secret}}")
+        + "&amp;grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer"
+        + "&amp;requested_token_use=on_behalf_of"
+        + "&amp;scope=https%3A%2F%2Fgraph.microsoft.com%2F.default"
+        + "&amp;assertion=" + Uri.EscapeDataString(context.Request.Headers.GetValueOrDefault("Authorization", "").Substring(7));
+    }</set-body>
+  </send-request>
+  <choose>
+    <when condition='@(!context.Variables.ContainsKey("oboResponse") || context.Variables["oboResponse"] == null)'>
+      <return-response>
+        <set-status code="504" reason="Gateway Timeout" />
+        <set-header name="Content-Type" exists-action="override"><value>application/problem+json</value></set-header>
+        <set-body>{"type":"about:blank","title":"Delegated token exchange timed out.","status":504,"code":"obo_timeout"}</set-body>
+      </return-response>
+    </when>
+    <when condition='@(((IResponse)context.Variables["oboResponse"]).StatusCode != 200)'>
+      <set-variable id="obo-failure" name="oboFailureCode" value='@{
+        var response = (IResponse)context.Variables["oboResponse"];
+        if (response.StatusCode == 429) { return "obo_throttled"; }
+        var json = response.Body.As&lt;JObject&gt;(preserveContent: true);
+        if (json["error"]?.Type != JTokenType.String) { return "obo_invalid_response"; }
+        var error = (string)json["error"];
+        if (new [] { "invalid_grant", "interaction_required", "consent_required", "login_required" }.Contains(error)) {
+          return "graph_user_action_required";
+        }
+        if (new [] { "invalid_client", "unauthorized_client", "invalid_scope" }.Contains(error)) {
+          return "obo_configuration_error";
+        }
+        return "obo_unavailable";
+      }' />
+      <set-variable name="oboStatus" value='@{
+        var code = (string)context.Variables["oboFailureCode"];
+        return code == "graph_user_action_required" ? 403 : (code == "obo_throttled" ? 429 : 502);
+      }' />
+      <set-variable name="oboRetryAfter" value='@{
+        var contract = JObject.Parse((string)context.Variables["graphContract"]);
+        var fallback = (int)contract["defaultRetryAfterSeconds"];
+        int seconds;
+        return Int32.TryParse(((IResponse)context.Variables["oboResponse"]).Headers.GetValueOrDefault("Retry-After", fallback.ToString()), out seconds)
+          ? Math.Max(1, Math.Min((int)contract["maximumRetryAfterSeconds"], seconds)) : fallback;
+      }' />
+      <return-response>
+        <set-status code='@((int)context.Variables["oboStatus"])' reason="Delegated token exchange failed" />
+        <set-header name="Content-Type" exists-action="override"><value>application/problem+json</value></set-header>
+        <set-header name="Cache-Control" exists-action="override"><value>no-store</value></set-header>
+        <set-header name="Retry-After" exists-action="override"><value>@(((int)context.Variables["oboRetryAfter"]).ToString())</value></set-header>
+        <set-body>@{
+          var status = (int)context.Variables["oboStatus"];
+          return new JObject(
+            new JProperty("type", "about:blank"),
+            new JProperty("title", status == 403 ? "Graph consent or interactive sign-in is required. Verify downstream delegated consent and Conditional Access." : "Delegated token exchange is unavailable."),
+            new JProperty("status", status),
+            new JProperty("code", (string)context.Variables["oboFailureCode"])
+          ).ToString(Newtonsoft.Json.Formatting.None);
+        }</set-body>
+      </return-response>
+    </when>
+  </choose>
+  <set-variable id="obo-token" name="graphAccessToken" value='@{
+    var json = ((IResponse)context.Variables["oboResponse"]).Body.As&lt;JObject&gt;(preserveContent: true);
+    if (json["access_token"]?.Type != JTokenType.String || json["token_type"]?.Type != JTokenType.String
+      || (string)json["token_type"] != "Bearer") { return ""; }
+    var token = (string)json["access_token"];
+    var contract = JObject.Parse((string)context.Variables["graphContract"]);
+    return String.IsNullOrWhiteSpace(token) || token.Length &gt; (int)contract["maximumAccessTokenLength"] ? "" : token;
+  }' />
+  <choose>
+    <when condition='@(String.IsNullOrEmpty((string)context.Variables["graphAccessToken"]))'>
+      <return-response>
+        <set-status code="502" reason="Invalid delegated token response" />
+        <set-header name="Content-Type" exists-action="override"><value>application/problem+json</value></set-header>
+        <set-header name="Cache-Control" exists-action="override"><value>no-store</value></set-header>
+        <set-body>{"type":"about:blank","title":"Delegated token exchange returned no valid access token.","status":502,"code":"obo_invalid_response"}</set-body>
+      </return-response>
+    </when>
+  </choose>
+  <set-header name="Authorization" exists-action="override">
+    <value>@("Bearer " + (string)context.Variables["graphAccessToken"])</value>
+  </set-header>
+</fragment>

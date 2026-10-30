@@ -1,0 +1,28 @@
+<fragment>
+  <validate-jwt header-name="Authorization" require-scheme="Bearer" require-expiration-time="true" require-signed-tokens="true" failed-validation-httpcode="401" failed-validation-error-message="A valid delegated gateway token from an approved client is required." output-token-variable-name="gatewayJwt">
+    <openid-config url="{{gateway-openid-config}}" />
+    <audiences><audience>{{gateway-client-id}}</audience></audiences>
+    <issuers><issuer>https://login.microsoftonline.com/{{gateway-tenant-id}}/v2.0</issuer></issuers>
+    <required-claims>
+      <claim name="tid" match="all"><value>{{gateway-tenant-id}}</value></claim>
+      <claim name="ver" match="all"><value>2.0</value></claim>
+      <claim name="scp" match="any" separator=" "><value>access_as_user</value></claim>
+      <claim name="azp" match="any">@@APPROVED_CLIENTS@@</claim>
+    </required-claims>
+  </validate-jwt>
+  <choose>
+    <when condition='@{
+      var jwt = (Jwt)context.Variables["gatewayJwt"];
+      return !jwt.Claims.ContainsKey("oid") || jwt.Claims["oid"].Length != 1
+        || !System.Text.RegularExpressions.Regex.IsMatch(jwt.Claims["oid"][0], "^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
+        || (jwt.Claims.ContainsKey("idtyp") &amp;&amp; jwt.Claims["idtyp"].Contains("app"));
+    }'>
+      <return-response>
+        <set-status code="401" reason="Unauthorized" />
+        <set-header name="Content-Type" exists-action="override"><value>application/problem+json</value></set-header>
+        <set-body>{"type":"about:blank","title":"A delegated user token is required.","status":401,"code":"gateway_user_required"}</set-body>
+      </return-response>
+    </when>
+  </choose>
+  <rate-limit-by-key calls="@@RATE_LIMIT_CALLS@@" renewal-period="@@RATE_LIMIT_PERIOD@@" counter-key='@("graph:" + ((Jwt)context.Variables["gatewayJwt"]).Claims["oid"][0])' />
+</fragment>

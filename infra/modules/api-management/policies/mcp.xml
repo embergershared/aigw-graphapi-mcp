@@ -1,0 +1,24 @@
+<policies>
+  <inbound>
+    <base />
+    <include-fragment fragment-id="graph-authenticate" />
+  </inbound>
+  <backend><base /></backend>
+  <outbound><base /></outbound>
+  <on-error>
+    <return-response>
+      <set-status code='@(context.LastError.Source == "validate-jwt" ? 401 : (context.LastError.Reason == "RateLimitExceeded" ? 429 : 502))' reason="MCP gateway request failed" />
+      <set-header name="Content-Type" exists-action="override"><value>application/problem+json</value></set-header>
+      <set-header name="Cache-Control" exists-action="override"><value>no-store</value></set-header>
+      <set-body>@{
+        var auth = context.LastError.Source == "validate-jwt";
+        var throttled = context.LastError.Reason == "RateLimitExceeded";
+        return new JObject(new JProperty("type", "about:blank"),
+          new JProperty("title", auth ? "A valid delegated gateway token is required." : "MCP gateway request failed."),
+          new JProperty("status", auth ? 401 : (throttled ? 429 : 502)),
+          new JProperty("code", auth ? "gateway_unauthorized" : (throttled ? "gateway_throttled" : "mcp_gateway_error"))
+        ).ToString(Newtonsoft.Json.Formatting.None);
+      }</set-body>
+    </return-response>
+  </on-error>
+</policies>

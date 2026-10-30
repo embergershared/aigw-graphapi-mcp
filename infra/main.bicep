@@ -66,6 +66,34 @@ param enableKeyVault bool?
 @description('Deploy the storage account catalog module. Defaults on for private and full.')
 param enableStorage bool?
 
+@description('Explicit opt-in to a public APIM Developer instance. No Graph API is exposed until graphMcp is configured.')
+param enableApiManagement bool = false
+
+@description('Explicit opt-in to the existing public Foundry account/project module.')
+param enableAiFoundry bool = false
+
+@description('Expose the protected Graph REST facade and native MCP tools only after separately approved identity and Key Vault configuration.')
+param enableGraphMcp bool = false
+
+@description('APIM publisher settings must be selected for the target; never put customer data in committed parameter files.')
+param apimPublisherName string = ''
+param apimPublisherEmail string = ''
+
+@description('Single-tenant gateway confidential application client ID. This is the v2 access-token audience.')
+param graphGatewayClientId string = ''
+
+@description('Comma-separated approved Foundry OAuth and local public-client application IDs.')
+param graphAllowedClientIdsCsv string = ''
+
+@description('Name of an existing versionless Key Vault secret holding the gateway OBO credential. No secret value is passed to ARM.')
+param graphCredentialSecretName string = 'graph-obo-client-secret'
+
+@description('Explicit model deployments as JSON: [{name,model,version,sku,capacity}]. Empty creates no model and incurs no model deployment action.')
+param foundryDeploymentsJson string = '[]'
+
+@description('Hook-derived Base64 model JSON for safe azd parameter interpolation. Empty retains direct foundryDeploymentsJson callers.')
+param foundryDeploymentsBase64 string = ''
+
 @description('Deploy Standard Azure Bastion. Defaults on for the full profile.')
 param enableBastion bool?
 
@@ -94,7 +122,7 @@ param enableRoleAssignments bool = true
 @description('Turn on Key Vault purge protection. Off only for throwaway environments, such as pull request deployments, whose vault must be purged on teardown. It cannot be turned off on a vault that already has it.')
 param enableKeyVaultPurgeProtection bool = true
 
-@description('Base64-encoded JSON object overriding profile feature flags. Supported keys: network, keyVault, storage, bastion, windowsVm, linuxVm, natGateway, entraLogin, shutdownSchedules, roleAssignments. natGateway and entraLogin must match.')
+@description('Base64-encoded JSON profile overrides. Supported keys: network, keyVault, storage, bastion, windowsVm, linuxVm, natGateway, entraLogin, shutdownSchedules, roleAssignments, apiManagement, aiFoundry, graphMcp. Public Graph MCP requires core, apiManagement, keyVault and roleAssignments with no network.')
 param featureOverridesBase64 string = 'e30='
 
 @description('Comma-separated Entra user or group object IDs that receive VM login and private data-plane roles.')
@@ -161,6 +189,33 @@ param shutdownTimeZone string = 'Eastern Standard Time'
 var tenantCode = tenantCodeFor(tenant().tenantId)
 var locationCode = locationCodeFor(location)
 var shortUniqueSuffix = take(uniqueString(subscription().id, environmentName, location), 3)
+
+var apiManagementName = globalName(
+  abbreviations.apiManagement,
+  locationCode,
+  subscriptionCode,
+  environmentName,
+  shortUniqueSuffix,
+  '-',
+  50
+)
+var aiFoundryName = globalName(
+  abbreviations.aiFoundry,
+  locationCode,
+  subscriptionCode,
+  environmentName,
+  shortUniqueSuffix,
+  '-',
+  64
+)
+var aiFoundryProjectName = azName(
+  abbreviations.aiFoundryProject,
+  tenantCode,
+  locationCode,
+  subscriptionCode,
+  environmentName,
+  ''
+)
 
 var resourceGroupName = azName(
   abbreviations.resourceGroup,
@@ -371,6 +426,9 @@ var featureSettings = union(
     entraLogin: enableEntraLogin ?? isFull
     shutdownSchedules: enableShutdownSchedules ?? isFull
     roleAssignments: enableRoleAssignments
+    apiManagement: enableApiManagement
+    aiFoundry: enableAiFoundry
+    graphMcp: enableGraphMcp
   },
   json(base64ToString(featureOverridesBase64))
 )
@@ -382,6 +440,9 @@ var deployEntraLogin = bool(featureSettings.entraLogin)
 var deployShutdownSchedules = bool(featureSettings.shutdownSchedules)
 var assignRoles = bool(featureSettings.roleAssignments)
 var deployAnyVm = deployWindowsVm || deployLinuxVm
+var deployApiManagement = bool(featureSettings.apiManagement)
+var deployAiFoundry = bool(featureSettings.aiFoundry)
+var configureGraphMcp = bool(featureSettings.graphMcp)
 
 // scripts/preflight.ps1 rejects inconsistent combinations with an actionable
 // message. These derivations keep a direct `az deployment sub create` that
@@ -411,6 +472,44 @@ module monitoring './modules/monitoring/main.bicep' = {
     applicationInsightsName: appInsightsName
     retentionInDays: logRetentionInDays
     dailyCapGb: logDailyCapGb
+  }
+}
+
+module apiManagement './modules/api-management/main.bicep' = if (deployApiManagement) {
+  name: 'api-management'
+  scope: resourceGroup
+  params: {
+    name: apiManagementName
+    location: location
+    tags: tags
+    publisherName: apimPublisherName
+    publisherEmail: apimPublisherEmail
+    logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
+    configureGraph: configureGraphMcp
+    tenantId: tenant().tenantId
+    gatewayClientId: graphGatewayClientId
+    allowedClientIds: empty(graphAllowedClientIdsCsv)
+      ? []
+      : map(split(graphAllowedClientIdsCsv, ','), clientId => trim(clientId))
+    keyVaultName: keyVaultName
+    credentialSecretName: graphCredentialSecretName
+  }
+  dependsOn: [
+    keyVault
+  ]
+}
+
+module aiFoundry './modules/ai-foundry/main.bicep' = if (deployAiFoundry) {
+  name: 'ai-foundry'
+  scope: resourceGroup
+  params: {
+    name: aiFoundryName
+    projectName: aiFoundryProjectName
+    location: location
+    tags: tags
+    deployments: json(empty(foundryDeploymentsBase64)
+      ? foundryDeploymentsJson
+      : base64ToString(foundryDeploymentsBase64))
   }
 }
 
@@ -469,6 +568,7 @@ module keyVault './modules/key-vault/main.bicep' = if (deployKeyVault) {
     tags: tags
     privateEndpointSubnetId: deployNetwork ? network!.outputs.privateEndpointSubnetId : ''
     privateDnsZoneId: deployNetwork ? privateDns!.outputs.keyVaultZoneId : ''
+    enablePublicAccess: !deployApiManagement
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
     enableWindowsVm: deployWindowsVm
     enableLinuxVm: deployLinuxVm
@@ -565,3 +665,12 @@ output AZURE_APPLICATION_INSIGHTS_NAME string = monitoring.outputs.applicationIn
 output AZURE_BASTION_NAME string = deployBastion ? bastion!.outputs.name : ''
 output AZURE_WINDOWS_VM_NAME string = deployWindowsVm ? jumpboxes!.outputs.windowsVmName : ''
 output AZURE_LINUX_VM_NAME string = deployLinuxVm ? jumpboxes!.outputs.linuxVmName : ''
+output AZURE_APIM_NAME string = deployApiManagement ? apiManagement!.outputs.name : ''
+output AZURE_APIM_ID string = deployApiManagement ? apiManagement!.outputs.id : ''
+output AZURE_APIM_PRINCIPAL_ID string = deployApiManagement ? apiManagement!.outputs.principalId : ''
+output AZURE_GRAPH_REST_URL string = deployApiManagement && configureGraphMcp ? apiManagement!.outputs.restUrl : ''
+output AZURE_GRAPH_MCP_API_ID string = deployApiManagement && configureGraphMcp ? apiManagement!.outputs.mcpApiId : ''
+output AZURE_AI_FOUNDRY_NAME string = deployAiFoundry ? aiFoundry!.outputs.name : ''
+output AZURE_AI_PROJECT_NAME string = deployAiFoundry ? aiFoundry!.outputs.projectName : ''
+output AZURE_AI_PROJECT_ID string = deployAiFoundry ? aiFoundry!.outputs.projectId : ''
+output AZURE_AI_PROJECT_ENDPOINT string = deployAiFoundry ? aiFoundry!.outputs.projectEndpoint : ''

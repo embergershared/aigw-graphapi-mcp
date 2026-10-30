@@ -26,6 +26,9 @@ azd env set DEPLOYMENT_PROFILE core # core, private, or full
 `core` is the default. It does not force Key Vault or Storage on a project —
 those are [catalog modules](modules.md) a project opts into, and in `core` they
 deploy public-with-firewall because there is no private endpoint subnet.
+The Graph gateway composition is stricter: its vault public network access
+remains Disabled with the trusted-service exception and deny-by-default firewall,
+in both the resource-only and Graph-enabled stages.
 
 Any other value, including the retired `minimal` profile, fails preflight.
 Switch such an environment with `azd env set DEPLOYMENT_PROFILE private`.
@@ -134,7 +137,39 @@ switch. See [resource providers](deployment.md#resource-providers).
 
 Supported Boolean keys are `network`, `keyVault`, `storage`, `bastion`,
 `windowsVm`, `linuxVm`, `natGateway`, `entraLogin`, `shutdownSchedules`, and
-`roleAssignments`.
+`roleAssignments`, `apiManagement`, `aiFoundry`, and `graphMcp`.
+
+The last three default to false on every profile. This public Graph PoC permits
+them only on `core` without networking. `graphMcp` additionally requires
+`apiManagement`, `keyVault`, `roleAssignments`, purge protection, an owned gateway
+client ID and exactly two allowed callers (Foundry web OAuth and local PKCE).
+Infrastructure can be provisioned with `graphMcp=false` before identities exist.
+
+| Workload environment value | Meaning |
+|---|---|
+| `APIM_PUBLISHER_NAME`, `APIM_PUBLISHER_EMAIL` | Explicitly selected publisher, required before APIM provisioning |
+| `GRAPH_GATEWAY_CLIENT_ID` | Owned single-tenant confidential gateway application |
+| `GRAPH_ALLOWED_CLIENT_IDS` | Comma-separated, distinct Foundry OAuth/public client IDs |
+| `GRAPH_CREDENTIAL_SECRET_NAME` | Vault secret **name** only; default `graph-obo-client-secret` |
+| `FOUNDRY_DEPLOYMENTS_JSON` | JSON array of explicit `name`, `model`, `version`, `sku`, positive integer `capacity`; default `[]` |
+
+No model, SKU, capacity, publisher, region or budget is selected by these defaults.
+`latest`, unknown deployment properties and implicit SKUs are rejected by the
+workload preflight. Secrets are not Bicep/azd parameters. Apply paths in the
+identity helpers require explicit matching `AZURE_TENANT_ID`,
+`AZURE_SUBSCRIPTION_ID` and `AZURE_LOCATION` in the selected azd environment.
+See [Graph MCP](graph-mcp.md) for staged overrides and verifier settings.
+
+The existing preprovision tag hook derives `FOUNDRY_DEPLOYMENTS_BASE64` from
+`FOUNDRY_DEPLOYMENTS_JSON`, just as it encodes feature overrides. This is safe
+transport through azd's parameter interpolation, not encryption or another user
+setting. Raw quoted model JSON would invalidate the composed parameter file.
+Bicep decodes the derived value; direct ARM callers can still use
+`foundryDeploymentsJson` when the Base64 parameter is empty. Do not put secrets
+in either value. Run the existing `scripts/set-deployment-tags.ps1` bootstrap
+before the first preview and after changing the selected model JSON: azd
+resolves required inputs before hooks, so do not rely on a preview to initialize
+or refresh derived values.
 
 ```powershell
 azd env set AZURE_FEATURE_OVERRIDES_JSON '{"keyVault":true,"storage":true}'

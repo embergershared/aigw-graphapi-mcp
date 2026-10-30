@@ -39,6 +39,31 @@
       }
     },
     {
+      "name": "api-management",
+      "displayName": "API Management",
+      "description": "Public Developer gateway with opt-in delegated Graph REST facade and four native MCP tools.",
+      "kind": "resource",
+      "abbreviation": "apim",
+      "additionalAbbreviations": [],
+      "featureFlag": "apiManagement",
+      "profiles": [
+        "core"
+      ],
+      "providers": [
+        "Microsoft.ApiManagement"
+      ],
+      "nameRule": "global",
+      "path": "infra/modules/api-management/main.bicep",
+      "privateEndpoints": [],
+      "roles": [],
+      "preflight": {
+        "checks": [
+          "graphGateway"
+        ],
+        "requiresOperatorPrincipals": false
+      }
+    },
+    {
       "name": "bastion",
       "displayName": "Azure Bastion",
       "description": "Standard SKU Azure Bastion with native client tunneling, providing browser and RDP/SSH access to jumpboxes without public IP addresses on the virtual machines.",

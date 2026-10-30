@@ -1,6 +1,6 @@
 # Architecture
 
-The template deploys at subscription scope, creates one environment resource
+The project deploys at subscription scope, creates one environment resource
 group, and invokes resource-group-scoped Bicep modules. Resources use
 deterministic environment/region naming and common ownership and lifecycle tags.
 
@@ -17,6 +17,30 @@ Two layers make that work, and they are deliberately separate:
 `infra/main.bicep` is the only file that changes per project: it resolves the
 profile, composes names from `infra/core/naming.bicep`, and invokes the modules
 the project has opted into.
+
+## Graph MCP workload
+
+The approved public PoC adds APIM Developer, a Foundry AIServices account/project
+and Key Vault to `core`, without a VNet, storage, VMs, Bastion or private DNS.
+All three workload flags default off; catalog membership is not activation.
+The gateway's vault keeps public network access Disabled without adding a private
+endpoint; its deny-by-default firewall and trusted-service bypass are retained.
+Other callers of the Key Vault module preserve their existing public-with-firewall
+default when private networking is absent.
+Provision infrastructure first, and enable `graphMcp` only after the separately
+approved tenant identities and vault secret are ready.
+
+The request path is signed-in user -> Foundry custom OAuth -> owned gateway
+audience -> APIM native Streamable HTTP MCP -> four curated REST operations ->
+Entra OBO -> Graph v1.0 `/me`. APIM's identity reads the vault credential, not
+mailboxes. A local public PKCE client can verify REST and MCP independently.
+No custom MCP process or hosted agent application is involved.
+
+`infra/modules/api-management/contract.json` owns the fields and limits.
+Validation/OBO fragments are reusable; REST-only outbound policies shape and
+bound Graph payloads. Native streaming bodies are never read. Runtime forwarding
+of identity and execution of backing REST policies remain live acceptance gates.
+See [the workload runbook](graph-mcp.md).
 
 ## Deployment profiles
 
@@ -137,6 +161,7 @@ rendered name obeys them.
 | Managed identity | `id-` | Standard order plus workload purpose |
 | Foundry account | `aif-` | Also the custom subdomain, so globally unique: environment truncated; three-character hash retained; maximum 64 characters |
 | Foundry project | `proj-` | Standard segment order; maximum 64 characters |
+| API Management | `apim-` | Globally unique; environment truncated; uniqueness suffix retained; maximum 50 characters |
 | Azure Maps account | `map-` | Standard segment order using the Maps region's location code |
 
 For example, East US 2, subscription

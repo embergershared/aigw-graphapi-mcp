@@ -1,6 +1,6 @@
-name: azure-azd-starter
+name: aigw-graphapi-mcp
 metadata:
-  template: azure-azd-starter@0.2.0
+  template: aigw-graphapi-mcp@0.1.0
 
 infra:
   provider: bicep

@@ -1,0 +1,219 @@
+<policies>
+  <inbound>
+    <base />
+    <include-fragment fragment-id="graph-authenticate" />
+    <set-variable name="graphContract" value='@(System.Text.Encoding.UTF8.GetString(Convert.FromBase64String("@@CONTRACT_BASE64@@")))' />
+    <set-variable id="graph-arguments" name="validatedGraphUrl" value='@{
+      var contract = JObject.Parse((string)context.Variables["graphContract"]);
+      var operation = context.Operation.Id;
+      var tool = ((JArray)contract["tools"]).OfType&lt;JObject&gt;().SingleOrDefault(t => (string)t["name"] == operation);
+      if (tool == null || context.Request.Method != "GET") { return "invalid_operation"; }
+      var list = operation.StartsWith("list_", StringComparison.Ordinal);
+      var calendar = operation == "list_calendar_view";
+      var query = context.Request.Url.Query;
+      var allowed = calendar ? new [] { "start", "end", "page_size", "continuation" } : (list ? new [] { "page_size", "continuation" } : new string[0]);
+      if (query.Any(p => !allowed.Contains(p.Key) || p.Value.Length != 1)) { return "unknown_or_duplicate_argument"; }
+      var basePath = (string)tool["path"];
+      var fields = (string)tool["fields"];
+      var order = (string)tool["orderBy"];
+      var top = (int)contract["defaultPageSize"];
+      var maximumTop = (int)contract["maximumPageSize"];
+      var dates = new Dictionary&lt;string, string&gt;();
+      var uri = "https://graph.microsoft.com" + basePath;
+      if (query.ContainsKey("continuation")) {
+        if (query.Count != 1) { return "continuation_must_be_sent_alone"; }
+        var encoded = query["continuation"][0];
+        if (encoded.Length == 0 || encoded.Length &gt; (int)contract["maximumCursorLength"]
+          || !System.Text.RegularExpressions.Regex.IsMatch(encoded, "^[A-Za-z0-9_-]+$")) { return "invalid_continuation"; }
+        var b64 = encoded.Replace("-", "+").Replace("_", "/");
+        b64 = b64.PadRight(b64.Length + (4 - b64.Length % 4) % 4, Convert.ToChar("="));
+        var cursor = JObject.Parse(System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(b64)));
+        var user = ((Jwt)context.Variables["gatewayJwt"]).Claims["oid"][0];
+        if (cursor["operation"]?.Type != JTokenType.String || cursor["userId"]?.Type != JTokenType.String
+          || (string)cursor["operation"] != operation || (string)cursor["userId"] != user || !list
+          || cursor.Properties().Count() != 3 || cursor["nextLink"]?.Type != JTokenType.String) { return "invalid_continuation"; }
+        Uri next;
+        if (!Uri.TryCreate((string)cursor["nextLink"], UriKind.Absolute, out next)
+          || next.Scheme != "https" || next.Host != "graph.microsoft.com" || next.Port != 443
+          || next.UserInfo.Length != 0 || next.Fragment.Length != 0 || next.AbsolutePath != basePath
+          || next.Query.Length == 0) { return "invalid_continuation"; }
+        var nextQuery = new Dictionary&lt;string, string&gt;();
+        foreach (var part in next.Query.Substring(1).Split(new [] { "&amp;" }, StringSplitOptions.None)) {
+          var pair = part.Split(new [] { "=" }, 2, StringSplitOptions.None);
+          if (pair.Length != 2) { return "invalid_continuation"; }
+          var key = System.Net.WebUtility.UrlDecode(pair[0]);
+          var value = System.Net.WebUtility.UrlDecode(pair[1]);
+          if (nextQuery.ContainsKey(key)) { return "invalid_continuation"; }
+          nextQuery.Add(key, value);
+        }
+        var allowedNext = calendar
+          ? new [] { "$top", "$select", "$orderby", "$skip", "$skiptoken", "startDateTime", "endDateTime" }
+          : new [] { "$top", "$select", "$orderby", "$skip", "$skiptoken" };
+        if (nextQuery.Keys.Any(k => !allowedNext.Contains(k))
+          || !nextQuery.ContainsKey("$top") || !Int32.TryParse(nextQuery["$top"], out top) || top &lt; 1 || top &gt; maximumTop
+          || !nextQuery.ContainsKey("$select") || nextQuery["$select"] != fields
+          || !nextQuery.ContainsKey("$orderby") || nextQuery["$orderby"] != order
+          || (nextQuery.ContainsKey("$skip") == nextQuery.ContainsKey("$skiptoken"))) { return "invalid_continuation"; }
+        if (nextQuery.ContainsKey("$skip")) {
+          long skip;
+          if (!Int64.TryParse(nextQuery["$skip"], out skip) || skip &lt; 0) { return "invalid_continuation"; }
+        }
+        if (nextQuery.ContainsKey("$skiptoken") &amp;&amp; String.IsNullOrEmpty(nextQuery["$skiptoken"])) { return "invalid_continuation"; }
+        if (calendar) {
+          if (!nextQuery.ContainsKey("startDateTime") || !nextQuery.ContainsKey("endDateTime")) { return "invalid_continuation"; }
+          dates.Add("start", nextQuery["startDateTime"]);
+          dates.Add("end", nextQuery["endDateTime"]);
+        }
+        uri = next.AbsoluteUri;
+      } else {
+        if (query.ContainsKey("page_size") &amp;&amp; (!Int32.TryParse(query["page_size"][0], out top)
+          || top &lt; 1 || top &gt; maximumTop)) { return "invalid_page_size"; }
+        if (!list) {
+          var parameter = operation == "get_message" ? "message_id" : "event_id";
+          var id = context.Request.MatchedParameters.ContainsKey(parameter) ? context.Request.MatchedParameters[parameter] : "";
+          if (id.Length == 0 || id.Length &gt; (int)contract["maximumIdLength"]
+            || !System.Text.RegularExpressions.Regex.IsMatch(id, "^[A-Za-z0-9_+=/-]+$")) { return "invalid_item_id"; }
+          uri += "/" + Uri.EscapeDataString(id);
+        }
+        uri += "?$select=" + Uri.EscapeDataString(fields);
+        if (list) { uri += "&amp;$top=" + top.ToString() + "&amp;$orderby=" + Uri.EscapeDataString(order); }
+        if (calendar) {
+          if (!query.ContainsKey("start") || !query.ContainsKey("end")) { return "calendar_offsets_required"; }
+          dates.Add("start", query["start"][0]);
+          dates.Add("end", query["end"][0]);
+          uri += "&amp;startDateTime=" + Uri.EscapeDataString(dates["start"]) + "&amp;endDateTime=" + Uri.EscapeDataString(dates["end"]);
+        }
+      }
+      if (calendar) {
+        var pattern = "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,7})?(Z|[+-]\\d{2}:\\d{2})$";
+        DateTimeOffset start;
+        DateTimeOffset end;
+        if (!System.Text.RegularExpressions.Regex.IsMatch(dates["start"], pattern)
+          || !System.Text.RegularExpressions.Regex.IsMatch(dates["end"], pattern)
+          || !DateTimeOffset.TryParse(dates["start"], out start)
+          || !DateTimeOffset.TryParse(dates["end"], out end)) { return "calendar_offsets_required"; }
+        if (end &lt;= start || (end - start).TotalDays &gt; (int)contract["maximumCalendarDays"]) { return "invalid_calendar_window"; }
+      }
+      return uri;
+    }' />
+    <choose>
+      <when condition='@(!((string)context.Variables["validatedGraphUrl"]).StartsWith("https://graph.microsoft.com/", StringComparison.Ordinal))'>
+        <return-response>
+          <set-status code="400" reason="Invalid Graph tool arguments" />
+          <set-header name="Content-Type" exists-action="override"><value>application/problem+json</value></set-header>
+          <set-body>@(new JObject(new JProperty("type", "about:blank"), new JProperty("title", "Invalid Graph tool arguments."), new JProperty("status", 400), new JProperty("code", (string)context.Variables["validatedGraphUrl"])).ToString(Newtonsoft.Json.Formatting.None))</set-body>
+        </return-response>
+      </when>
+    </choose>
+    <include-fragment fragment-id="graph-obo" />
+    <set-backend-service base-url="https://graph.microsoft.com" />
+    <rewrite-uri template='@(((string)context.Variables["validatedGraphUrl"]).Substring("https://graph.microsoft.com".Length))' copy-unmatched-params="false" />
+    <set-header name="Accept" exists-action="override"><value>application/json</value></set-header>
+    <set-header name="Accept-Encoding" exists-action="override"><value>identity</value></set-header>
+    <set-header name="Prefer" exists-action="override"><value>outlook.body-content-type="text"</value></set-header>
+    <set-header name="X-AnchorMailbox" exists-action="delete" />
+    <set-header name="X-HTTP-Method-Override" exists-action="delete" />
+    <set-header name="ConsistencyLevel" exists-action="delete" />
+  </inbound>
+  <backend>
+    <forward-request timeout="@@BACKEND_TIMEOUT@@" buffer-response="true" fail-on-error-status-code="false" />
+  </backend>
+  <outbound>
+    <set-header name="Cache-Control" exists-action="override"><value>no-store</value></set-header>
+    <set-header name="Content-Type" exists-action="override"><value>application/json</value></set-header>
+    <choose>
+      <when condition="@(context.Response.StatusCode == 200)">
+        <set-variable name="shapedGraphResponse" value='@{
+          var contract = JObject.Parse((string)context.Variables["graphContract"]);
+          var operation = context.Operation.Id;
+          var list = operation.StartsWith("list_", StringComparison.Ordinal);
+          var limit = list ? (int)contract["listMaxBytes"] : (int)contract["detailMaxBytes"];
+          var raw = context.Response.Body.As&lt;string&gt;(preserveContent: true);
+          if (System.Text.Encoding.UTF8.GetByteCount(raw) &gt; limit) { return "response_too_large"; }
+          var json = JObject.Parse(raw);
+          var tool = ((JArray)contract["tools"]).OfType&lt;JObject&gt;().Single(t => (string)t["name"] == operation);
+          var fields = ((string)tool["fields"]).Split(new [] { "," }, StringSplitOptions.None);
+          JObject shaped;
+          if (list) {
+            var items = json["value"] as JArray;
+            if (items == null || items.Count &gt; (int)contract["maximumPageSize"]
+              || items.Any(i => i.Type != JTokenType.Object || i["id"]?.Type != JTokenType.String)) { return "invalid_backend_response"; }
+            var selected = new JArray(items.OfType&lt;JObject&gt;().Select(i => new JObject(i.Properties().Where(p => fields.Contains(p.Name)))));
+            JToken continuation = JValue.CreateNull();
+            if (json["@odata.nextLink"] != null) {
+              Uri next;
+              if (!Uri.TryCreate((string)json["@odata.nextLink"], UriKind.Absolute, out next)
+                || next.Scheme != "https" || next.Host != "graph.microsoft.com" || next.Port != 443
+                || next.UserInfo.Length != 0 || next.Fragment.Length != 0 || next.AbsolutePath != (string)tool["path"]) { return "invalid_backend_continuation"; }
+              var cursor = new JObject(new JProperty("operation", operation),
+                new JProperty("userId", ((Jwt)context.Variables["gatewayJwt"]).Claims["oid"][0]),
+                new JProperty("nextLink", next.AbsoluteUri)).ToString(Newtonsoft.Json.Formatting.None);
+              var encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(cursor)).TrimEnd(Convert.ToChar("=")).Replace("+", "-").Replace("/", "_");
+              if (encoded.Length &gt; (int)contract["maximumCursorLength"]) { return "invalid_backend_continuation"; }
+              continuation = new JValue(encoded);
+            }
+            shaped = new JObject(new JProperty("items", selected), new JProperty("continuation", continuation));
+          } else {
+            if (json["id"]?.Type != JTokenType.String) { return "invalid_backend_response"; }
+            if (json["body"] is JObject &amp;&amp; (string)json["body"]["contentType"] != "text") { return "unsupported_body_format"; }
+            shaped = new JObject(json.Properties().Where(p => fields.Contains(p.Name)));
+          }
+          var result = shaped.ToString(Newtonsoft.Json.Formatting.None);
+          return System.Text.Encoding.UTF8.GetByteCount(result) &gt; limit ? "response_too_large" : result;
+        }' />
+        <choose>
+          <when condition='@(!((string)context.Variables["shapedGraphResponse"]).StartsWith("{", StringComparison.Ordinal))'>
+            <return-response>
+              <set-status code="502" reason="Graph response rejected" />
+              <set-header name="Content-Type" exists-action="override"><value>application/problem+json</value></set-header>
+              <set-header name="Cache-Control" exists-action="override"><value>no-store</value></set-header>
+              <set-body>@(new JObject(new JProperty("type", "about:blank"), new JProperty("title", "Graph response violates the bounded tool contract; no content was truncated."), new JProperty("status", 502), new JProperty("code", (string)context.Variables["shapedGraphResponse"])).ToString(Newtonsoft.Json.Formatting.None))</set-body>
+            </return-response>
+          </when>
+        </choose>
+        <set-body>@((string)context.Variables["shapedGraphResponse"])</set-body>
+      </when>
+      <otherwise>
+        <set-variable name="graphFailureStatus" value='@(new [] { 401, 403, 404, 429 }.Contains(context.Response.StatusCode) ? context.Response.StatusCode : 502)' />
+        <set-variable name="graphRetryAfter" value='@{
+          var contract = JObject.Parse((string)context.Variables["graphContract"]);
+          int seconds;
+          var fallback = (int)contract["defaultRetryAfterSeconds"];
+          return Int32.TryParse(context.Response.Headers.GetValueOrDefault("Retry-After", fallback.ToString()), out seconds)
+            ? Math.Max(1, Math.Min((int)contract["maximumRetryAfterSeconds"], seconds)) : fallback;
+        }' />
+        <return-response>
+          <set-status code='@((int)context.Variables["graphFailureStatus"])' reason="Graph request failed" />
+          <set-header name="Content-Type" exists-action="override"><value>application/problem+json</value></set-header>
+          <set-header name="Cache-Control" exists-action="override"><value>no-store</value></set-header>
+          <set-header name="Retry-After" exists-action="override"><value>@(((int)context.Variables["graphRetryAfter"]).ToString())</value></set-header>
+          <set-body>@{
+            var status = (int)context.Variables["graphFailureStatus"];
+            return new JObject(new JProperty("type", "about:blank"), new JProperty("title", "Graph request failed."),
+              new JProperty("status", status), new JProperty("code",
+              status == 401 ? "graph_unauthorized" : (status == 403 ? "graph_forbidden" : (status == 404 ? "graph_not_found" : (status == 429 ? "graph_throttled" : "graph_backend_error"))))
+            ).ToString(Newtonsoft.Json.Formatting.None);
+          }</set-body>
+        </return-response>
+      </otherwise>
+    </choose>
+  </outbound>
+  <on-error>
+    <return-response>
+      <set-status code='@(context.LastError.PolicyId == "graph-arguments" ? 400 : (context.LastError.Source == "validate-jwt" ? 401 : (context.LastError.Reason == "RateLimitExceeded" ? 429 : (context.LastError.Reason == "Timeout" ? 504 : 502))))' reason="Graph gateway request failed" />
+      <set-header name="Content-Type" exists-action="override"><value>application/problem+json</value></set-header>
+      <set-header name="Cache-Control" exists-action="override"><value>no-store</value></set-header>
+      <set-body>@{
+        var auth = context.LastError.Source == "validate-jwt";
+        var throttled = context.LastError.Reason == "RateLimitExceeded";
+        var timeout = context.LastError.Reason == "Timeout";
+        var input = context.LastError.PolicyId == "graph-arguments";
+        var obo = context.LastError.PolicyId == "obo-failure" || context.LastError.PolicyId == "obo-token";
+        return new JObject(new JProperty("type", "about:blank"), new JProperty("title", "Graph gateway request failed."),
+          new JProperty("status", input ? 400 : (auth ? 401 : (throttled ? 429 : (timeout ? 504 : 502)))),
+          new JProperty("code", input ? "invalid_continuation" : (auth ? "gateway_unauthorized" : (throttled ? "gateway_throttled" : (timeout ? "graph_timeout" : (obo ? "obo_invalid_response" : "invalid_backend_response")))))
+        ).ToString(Newtonsoft.Json.Formatting.None);
+      }</set-body>
+    </return-response>
+  </on-error>
+</policies>

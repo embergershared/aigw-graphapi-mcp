@@ -20,7 +20,10 @@ as an opt-in secret store in `core` and `private`.
 The module body is identical in all three profiles. Supplying
 `privateEndpointSubnetId` and `privateDnsZoneId` switches it from
 public-with-firewall to private-only; leaving both empty leaves it reachable
-from trusted Azure services with a deny-by-default firewall.
+from trusted Azure services with a deny-by-default firewall. `enablePublicAccess=false`
+also disables public network access without creating a private endpoint. The
+Graph gateway composition uses this restriction in both stages, while retaining
+the trusted-service exception. Other module callers keep their existing default.
 
 ## Parameters
 
@@ -33,6 +36,7 @@ from trusted Azure services with a deny-by-default firewall.
 | `privateEndpointNetworkInterfaceName` | string | yes | Ignored when no subnet is supplied |
 | `privateEndpointSubnetId` | string | no | Empty means public with firewall |
 | `privateDnsZoneId` | string | no | Empty means public with firewall |
+| `enablePublicAccess` | bool | no | Default `true`; ignored when a private endpoint disables public access. The Graph gateway composition sets `false` |
 | `logAnalyticsWorkspaceId` | string | yes | Diagnostics target |
 | `enableWindowsVm` / `enableLinuxVm` | bool | no | Controls which credential secrets are written |
 | `windowsAdminUsername` / `linuxAdminUsername` | string | yes | |

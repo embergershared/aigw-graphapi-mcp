@@ -1,6 +1,6 @@
 # Getting started
 
-Every project made from this template gets the same conventions layer —
+This project preserves the starter's conventions layer —
 deterministic naming, an approved region catalog, a stable subscription code,
 common lifecycle tags, `azd` wiring, preflight validation and a test suite that
 enforces all of it. Infrastructure beyond that is opt-in.
@@ -12,12 +12,12 @@ needs a desktop inside that VNet.
 
 ## Start here
 
-A new repository made from the template is set up once with
-`./scripts/Initialize-Repo.ps1`; see [template.md](template.md).
+For this project's approved workload, start with [Graph MCP](graph-mcp.md).
+The repository is already initialized from the starter. The generic profile
+instructions below are background, not approval to provision the workload.
 
 1. Create your local tenant and subscription files with
-   `./scripts/init-local-files.ps1` (`Initialize-Repo.ps1` already did it in its
-   clone), then record your tenants in them; see
+   `./scripts/init-local-files.ps1`, then record your tenants in them; see
    [Local tenant and subscription files](deployment.md#local-tenant-and-subscription-files).
    They are gitignored: they name real tenants.
 2. Review [prerequisites and required roles](deployment.md#prerequisites-and-roles).

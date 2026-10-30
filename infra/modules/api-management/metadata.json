@@ -1,0 +1,17 @@
+{
+  "name": "api-management",
+  "displayName": "API Management",
+  "description": "Public Developer gateway with opt-in delegated Graph REST facade and four native MCP tools.",
+  "kind": "resource",
+  "abbreviation": "apim",
+  "featureFlag": "apiManagement",
+  "profiles": ["core"],
+  "providers": ["Microsoft.ApiManagement"],
+  "privateEndpoints": [],
+  "roles": [],
+  "nameRule": "global",
+  "preflight": {
+    "checks": ["graphGateway"],
+    "requiresOperatorPrincipals": false
+  }
+}

@@ -1,5 +1,10 @@
 # What the template contains
 
+Historical upstream documentation only. This repository was initialized from the
+starter in #5, which also removed the one-time initializer and its template-only tests.
+Use [Graph MCP](graph-mcp.md) and [getting started](getting-started.md), not the
+upstream setup steps below.
+
 New Azure projects start from
 [embergershared/azd-private-starter-template](https://github.com/embergershared/azd-private-starter-template).
 It brings the azd and Bicep conventions, the module catalog and the pull request deployments,

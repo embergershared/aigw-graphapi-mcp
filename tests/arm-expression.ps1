@@ -428,12 +428,21 @@ function Invoke-ArmCall {
             # resource ID is the same for every iteration.
             return 0
         }
-        'resourceId' {
+        'guid' {
+            # ARM uses RFC 4122 UUIDv5 with this fixed namespace and hyphen-joined inputs.
+            $namespaceBytes = ([guid]'11fb06fb-712d-4ddd-98c7-e71bbd588830').ToByteArray($true)
+            $nameBytes = [Text.Encoding]::UTF8.GetBytes(($values -join '-'))
+            $hash = [Security.Cryptography.SHA1]::HashData([byte[]]($namespaceBytes + $nameBytes))
+            $hash[6] = ($hash[6] -band 0x0f) -bor 0x50
+            $hash[8] = ($hash[8] -band 0x3f) -bor 0x80
+            return ([guid]::new([byte[]]$hash[0..15], $true)).ToString()
+        }
+        { $_ -in @('resourceId','extensionResourceId') } {
             # Mirrors ARM's segment layout so a test can inspect the ID's shape.
             # The subscription and resource group are fixed stand-ins, and an
             # empty name stays an empty segment, the malformed ID ARM rejects,
             # instead of being dropped.
-            $typeIndex = 0
+            $typeIndex = if ($name -eq 'extensionResourceId') { 1 } else { 0 }
             while ($typeIndex -lt $values.Count -and ([string] $values[$typeIndex]) -notlike '*/*') { $typeIndex++ }
             if ($typeIndex -ge $values.Count) {
                 throw "resourceId() received no resource type: $($values -join ', ')"
@@ -443,7 +452,10 @@ function Invoke-ArmCall {
             if ($names.Count -ne ($typeSegments.Count - 1)) {
                 throw "resourceId() type '$($values[$typeIndex])' takes $($typeSegments.Count - 1) name(s) but received $($names.Count)."
             }
-            $id = '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg/providers/' + $typeSegments[0]
+            $scope = if ($name -eq 'extensionResourceId') {
+                ([string] $values[0]).TrimEnd('/')
+            } else { '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg' }
+            $id = $scope + '/providers/' + $typeSegments[0]
             for ($i = 0; $i -lt $names.Count; $i++) {
                 $id += '/' + $typeSegments[$i + 1] + '/' + $names[$i]
             }

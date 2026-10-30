@@ -110,6 +110,15 @@ $featureOverridesBase64 = [Convert]::ToBase64String(
 )
 Invoke-Azd -Arguments @('env', 'set', 'AZURE_FEATURE_OVERRIDES_BASE64', $featureOverridesBase64)
 
+$foundryDeploymentsJson = (& azd env get-value FOUNDRY_DEPLOYMENTS_JSON 2>$null)
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($foundryDeploymentsJson)) {
+    $foundryDeploymentsJson = '[]'
+}
+$foundryDeploymentsBase64 = [Convert]::ToBase64String(
+    [Text.Encoding]::UTF8.GetBytes($foundryDeploymentsJson.Trim())
+)
+Invoke-Azd -Arguments @('env', 'set', 'FOUNDRY_DEPLOYMENTS_BASE64', $foundryDeploymentsBase64)
+
 $operatorPrincipalIds = (& azd env get-value AZURE_OPERATOR_PRINCIPAL_IDS 2>$null)
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($operatorPrincipalIds)) {
     # Operator RBAC only matters once a jumpbox exists. In the core and private

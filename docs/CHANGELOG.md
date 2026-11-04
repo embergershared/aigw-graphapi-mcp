@@ -25,6 +25,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Optional `AZURE_NAME_SUFFIX` replaces the derived suffix of globally unique names, so an
   environment can be deployed again while a deleted vault or Foundry account still holds its
   names; unset, every name is unchanged (#12).
+- [Authentication](authentication.md): how a Teams user of the agent reaches their own mail and calendar in Graph,
+  step by step (Bot Service, custom OAuth consent, stored user tokens, APIM token checks, on-behalf-of, `/me`), the
+  two consents, who holds which credential, and a Microsoft Learn or repository source for each claim (#14).
 
 ### Changed
 - Convention adoption carries preflight's default-off Graph configuration validator,

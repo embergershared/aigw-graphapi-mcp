@@ -90,7 +90,8 @@ blindly retry auth failures or replace user access with managed identity.
 Validation checks signature, issuer, tenant, audience, lifetime, v2, approved
 `azp`, delegated `access_as_user` and user `oid`; app-only tokens are rejected
 on REST **and MCP**. Downstream Graph consent must exist before OBO. Foundry
-sign-in alone does not grant Graph consent. No `openid`/Graph write permission
+sign-in alone does not grant Graph consent. [Authentication](authentication.md)
+follows one Teams request to Graph step by step, with sources. No `openid`/Graph write permission
 is added to create fixtures.
 
 Azure resource RBAC, Entra app-management authority, delegated consent authority,

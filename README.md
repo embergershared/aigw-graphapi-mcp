@@ -38,6 +38,7 @@ apps, consent and the gateway credential are approved; see [docs/graph-mcp.md](d
 |---|---|
 | [docs/graph-mcp.md](docs/graph-mcp.md) | **Graph MCP start here:** contracts, identity, OAuth, deployment gates, synthetic verification and recovery |
 | [docs/authentication.md](docs/authentication.md) | From a Teams user to Microsoft Graph: each sign-in, token, consent and on-behalf-of swap, with sources |
+| [docs/custom-mcp-server.md](docs/custom-mcp-server.md) | Design, not implemented: a custom MCP server that calls Graph, directly or behind an APIM passthrough |
 | [docs/getting-started.md](docs/getting-started.md) | **Start here:** local tenant files, a first environment and preview, profiles, adding resources, tests |
 | [docs/architecture.md](docs/architecture.md) | The conventions layer, profiles, network, naming contract, extension points |
 | [docs/configuration.md](docs/configuration.md) | Profiles, environment values, preflight, expert overrides, resource naming |

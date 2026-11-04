@@ -28,6 +28,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - [Authentication](authentication.md): how a Teams user of the agent reaches their own mail and calendar in Graph,
   step by step (Bot Service, custom OAuth consent, stored user tokens, APIM token checks, on-behalf-of, `/me`), the
   two consents, who holds which credential, and a Microsoft Learn or repository source for each claim (#14).
+- [Custom MCP server variants](custom-mcp-server.md): a design, not implemented, for a custom-coded MCP server that
+  calls Graph, either called directly by the agent or behind an APIM passthrough MCP API: the Entra, code, Bicep,
+  APIM and Foundry changes, the files each variant touches and how to verify it (#16).
 
 ### Changed
 - Convention adoption carries preflight's default-off Graph configuration validator,

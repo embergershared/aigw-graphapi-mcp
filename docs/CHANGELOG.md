@@ -31,6 +31,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - [Custom MCP server variants](custom-mcp-server.md): a design, not implemented, for a custom-coded MCP server that
   calls Graph, either called directly by the agent or behind an APIM passthrough MCP API: the Entra, code, Bicep,
   APIM and Foundry changes, the files each variant touches and how to verify it (#16).
+- [Option A plan](../plans/option-a-teams-bot-per-user-token-gcc-high.md): a Teams bot owns the
+  user sign-in and runs the Foundry agent's function calls against APIM with the user's gateway
+  token, for tenants where the Foundry custom OAuth connection cannot be created yet (#18).
 
 ### Changed
 - Convention adoption carries preflight's default-off Graph configuration validator,

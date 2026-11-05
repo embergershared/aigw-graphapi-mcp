@@ -18,7 +18,8 @@ from Key Vault. No user token or mailbox response is cached.
 Use `core` plus explicit APIM, Foundry and Key Vault opt-ins. Existing private/full
 defaults are preserved but not a supported Graph PoC configuration. No VM,
 Bastion, NAT, storage, private endpoints/DNS, Function, container, separate MCP
-process, toolbox or hosted agent application is added. There are no writes,
+process, toolbox or hosted agent application is added; [custom MCP server
+variants](custom-mcp-server.md) describes a not-implemented design with one. There are no writes,
 application permissions, shared mailboxes, attachments or arbitrary Graph proxy.
 Tenant registrations/grants are not resource-group resources. The optional
 [Teams publication](#publish-to-teams-and-microsoft-365-copilot) adds an Azure Bot
@@ -90,7 +91,8 @@ blindly retry auth failures or replace user access with managed identity.
 Validation checks signature, issuer, tenant, audience, lifetime, v2, approved
 `azp`, delegated `access_as_user` and user `oid`; app-only tokens are rejected
 on REST **and MCP**. Downstream Graph consent must exist before OBO. Foundry
-sign-in alone does not grant Graph consent. No `openid`/Graph write permission
+sign-in alone does not grant Graph consent. [Authentication](authentication.md)
+follows one Teams request to Graph step by step, with sources. No `openid`/Graph write permission
 is added to create fixtures.
 
 Azure resource RBAC, Entra app-management authority, delegated consent authority,

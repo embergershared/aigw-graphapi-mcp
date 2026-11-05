@@ -25,6 +25,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Optional `AZURE_NAME_SUFFIX` replaces the derived suffix of globally unique names, so an
   environment can be deployed again while a deleted vault or Foundry account still holds its
   names; unset, every name is unchanged (#12).
+- [Authentication](authentication.md): how a Teams user of the agent reaches their own mail and calendar in Graph,
+  step by step (Bot Service, custom OAuth consent, stored user tokens, APIM token checks, on-behalf-of, `/me`), the
+  two consents, who holds which credential, and a Microsoft Learn or repository source for each claim (#14).
+- [Custom MCP server variants](custom-mcp-server.md): a design, not implemented, for a custom-coded MCP server that
+  calls Graph, either called directly by the agent or behind an APIM passthrough MCP API: the Entra, code, Bicep,
+  APIM and Foundry changes, the files each variant touches and how to verify it (#16).
 - [Option A plan](../plans/option-a-teams-bot-per-user-token-gcc-high.md): a Teams bot owns the
   user sign-in and runs the Foundry agent's function calls against APIM with the user's gateway
   token, for tenants where the Foundry custom OAuth connection cannot be created yet (#18).

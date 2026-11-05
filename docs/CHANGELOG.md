@@ -25,6 +25,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Optional `AZURE_NAME_SUFFIX` replaces the derived suffix of globally unique names, so an
   environment can be deployed again while a deleted vault or Foundry account still holds its
   names; unset, every name is unchanged (#12).
+- [Option A plan](../plans/option-a-teams-bot-per-user-token-gcc-high.md): a Teams bot owns the
+  user sign-in and runs the Foundry agent's function calls against APIM with the user's gateway
+  token, for tenants where the Foundry custom OAuth connection cannot be created yet (#18).
 
 ### Changed
 - Convention adoption carries preflight's default-off Graph configuration validator,
